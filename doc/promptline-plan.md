@@ -212,3 +212,16 @@ Each phase ends with passing `xvfb-run -a pytest` and a manual run of
   api.openai.com use the Responses API (`store: false`, encrypted
   reasoning carried between turns). Verified live, including a follow-up
   turn. Prediction and local servers stay on Chat Completions.
+- **Phase 5 done: identity, preferences, docs.** Renamed so Promptline
+  installs next to Terminator (`promptlinelib`, `promptline` command, D-Bus
+  `io.github.m_tek39.Promptline`, `~/.config/promptline` with a first-run
+  copy of the Terminator config). Added a Preferences → Promptline page
+  built in code, the README/INSTALL, and `doc/UPSTREAM.md`. A trial merge
+  of a simulated upstream release showed edits following the rename,
+  added files landing in `promptlinelib/` (with
+  `merge.directoryRenames=true`), and a conflict in `config.py`, which is
+  now avoided by `promptline_defaults.py`.
+- **Regression fixed during phase 5:** from phase 4 on, termprops were
+  registered after the first terminal existed, which VTE refuses, so the
+  real app got no shell marks. `terminal.py` now registers them at import,
+  and a fresh-process test guards it.

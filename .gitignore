@@ -24,3 +24,4 @@ promptlinelib/meliae
 .intltool*
 data/promptline.appdata.xml
 data/promptline.desktop
+data/promptline.metainfo.xml
