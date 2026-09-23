@@ -122,6 +122,10 @@ DEFAULTS = {
 
             'new_tab_after_current_tab': False,
             'window_decoration_style': 'auto',
+
+            'promptline_enabled'    : True,
+            'promptline_shell_integration': True,
+            'promptline_autocomplete': True,
         },
         'keybindings': {
             'zoom'             : '',

@@ -218,6 +218,7 @@ setup(name=APP_NAME,
       packages=[
           'terminatorlib',
           'terminatorlib.plugins',
+          'terminatorlib.promptline',
       ],
       install_requires=[
           'pycairo',
@@ -227,7 +228,10 @@ setup(name=APP_NAME,
           'psutil',
       ],
       extras_require={'test': test_deps},
-      package_data={'terminatorlib': ['preferences.glade', 'layoutlauncher.glade']},
+      package_data={'terminatorlib': ['preferences.glade', 'layoutlauncher.glade'],
+                    'terminatorlib.promptline': ['shell/promptline.bash',
+                                                 'shell/promptline.zsh',
+                                                 'shell/zdotdir/.zshenv']},
       cmdclass={'build': BuildData, 'install_data': InstallData, 'uninstall': Uninstall},
       distclass=TerminatorDist)
 

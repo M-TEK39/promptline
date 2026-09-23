@@ -31,6 +31,8 @@ from .signalman import Signalman
 from . import plugin
 from terminatorlib.layoutlauncher import LayoutLauncher
 from . import regex
+from . import promptline
+from .promptline import shellint
 
 # pylint: disable-msg=R0904
 class Terminal(Gtk.VBox):
@@ -90,6 +92,7 @@ class Terminal(Gtk.VBox):
     terminator = None
     vte = None
     terminalbox = None
+    promptline = None
     scrollbar = None
     titlebar = None
     searchbar = None
@@ -170,6 +173,7 @@ class Terminal(Gtk.VBox):
 
         self.update_url_matches()
 
+        self.promptline = promptline.attach(self)
         self.terminalbox = self.create_terminalbox()
 
         self.titlebar = Titlebar(self)
@@ -271,6 +275,8 @@ class Terminal(Gtk.VBox):
         """Close ourselves"""
         dbg('close: called')
         self.cnxids.remove_widget(self.vte)
+        if self.promptline:
+            self.promptline.destroy()
         self.emit('close-term')
         if self.pid is not None:
             try:
@@ -1726,6 +1732,10 @@ class Terminal(Gtk.VBox):
             envv.append('TERMINATOR_DBUS_NAME=%s' % self.terminator.dbus_name)
         if self.terminator.dbus_path:
             envv.append('TERMINATOR_DBUS_PATH=%s' % self.terminator.dbus_path)
+
+        if command is None and self.promptline and not util.is_flatpak() \
+                and promptline.enabled('shell_integration'):
+            args, envv = shellint.inject(shell, args, envv)
 
         dbg('Forking shell: "%s" with args: %s' % (shell, args))
         args.insert(0, shell)
