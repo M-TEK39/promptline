@@ -3,8 +3,11 @@
 """controller.py - per-terminal glue between VTE and Promptline
 
 One Controller is attached to each Terminal. It feeds shell marks from VTE
-into a ShellSession, and shows and accepts inline suggestions.
+into a ShellSession, shows and accepts inline suggestions, and launches
+@agent.
 """
+
+import os
 
 import gi
 gi.require_version('Gtk', '3.0')
@@ -16,8 +19,10 @@ from ..signalman import Signalman
 from ..util import dbg
 from .. import promptline
 from . import marks
+from .agent import agent_program, parse_invocation, take_prefill, \
+    write_request
 from .ghost import GhostText
-from .providers import make_provider
+from .providers import make_provider, provider_settings
 from .session import ShellSession
 from .suggest import Suggester
 from .suggest.history import shared_store
@@ -28,6 +33,7 @@ NOT_FOUND = 127
 # Wait for a pause in typing before asking the model
 PREDICT_DELAY_MS = 350
 PREDICT_MIN_TYPED = 2
+AGENT_LAUNCHER = '_promptline_agent'
 
 
 class VteScreen(object):
@@ -64,6 +70,8 @@ class Controller(object):
         self.prediction = None      # full command line the model predicted
         self.predict_id = None
         self.predicted_for = None   # input the last request was made for
+        self.agent_token = None     # the @agent request running here
+        self.agent_started = False
         self.cnxids = Signalman()
         self.cnxids.new(self.vte, 'termprops-changed',
                         self.on_termprops_changed)
@@ -110,6 +118,8 @@ class Controller(object):
         session = self.session
         if name == marks.EXEC:
             self.reset_prediction()
+            if self.agent_token is not None:
+                self.agent_started = True
             session.on_exec(marks.decode_command(value),
                             self.terminal.get_cwd())
         elif name == marks.DONE:
@@ -121,6 +131,8 @@ class Controller(object):
             session.on_input()
             if session.log:
                 self.learn(session.log[-1])
+            if self.agent_token is not None and self.agent_started:
+                self.agent_finished()
         self.schedule_refresh()
 
     def learn(self, record):
@@ -128,6 +140,9 @@ class Controller(object):
         if record is self.last_learned:
             return
         self.last_learned = record
+        if record.command.startswith(AGENT_LAUNCHER + ' '):
+            # The agent's own run: its transcript isn't the user's context
+            record.private = True
         dbg('promptline command %r exited %s with %d chars output' %
             (record.command, record.exit_status, len(record.output or '')))
         if record.private or record.exit_status == NOT_FOUND:
@@ -201,6 +216,8 @@ class Controller(object):
         if prediction and prediction.startswith(typed) and \
                 len(prediction) > len(typed):
             return      # still typing along the last prediction
+        if typed.lstrip().startswith('@'):
+            return      # an @agent question, not a command
         if typed.strip():
             if len(typed.strip()) < PREDICT_MIN_TYPED:
                 return
@@ -230,12 +247,15 @@ class Controller(object):
             self.schedule_refresh()
 
     def on_keypress(self, event):
-        """Accept the suggestion on Right/End (all of it) or Ctrl+Right (the
-        next word; Alt+Right is Terminator's go_right). Returns True if the
-        key was consumed."""
+        """Launch @agent on Enter; accept the suggestion on Right/End (all
+        of it) or Ctrl+Right (the next word; Alt+Right is Terminator's
+        go_right). Returns True if the key was consumed."""
+        modifiers = event.state & Gtk.accelerator_get_default_mod_mask()
+        if event.keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and \
+                modifiers == 0:
+            return self.launch_agent()
         if self.suggestion is None:
             return False
-        modifiers = event.state & Gtk.accelerator_get_default_mod_mask()
         right = event.keyval in (Gdk.KEY_Right, Gdk.KEY_KP_Right)
         end = event.keyval in (Gdk.KEY_End, Gdk.KEY_KP_End)
         if (right or end) and modifiers == 0:
@@ -258,3 +278,54 @@ class Controller(object):
         self.ghost.clear()
         self.vte.feed_child(suffix.encode('utf-8'))
         return True
+
+    def launch_agent(self):
+        """If the line being entered is '@agent ...', hand it to the agent
+        instead of the shell. Returns True if it did."""
+        line = self.session.current_input()
+        if line is None:
+            return False
+        query = parse_invocation(line.text)
+        if query is None or agent_program() is None:
+            return False
+        request = {
+            'query': query,
+            'prompt_prefix': self.session.prompt_prefix,
+            'cwd': self.terminal.get_cwd(),
+            'shell': self.shell(),
+            'terminal': getattr(getattr(self.terminal, 'uuid', None), 'urn',
+                                None),
+            'records': [record.as_dict() for record in self.session.log
+                        if not record.private],
+            'settings': provider_settings('agent'),
+        }
+        try:
+            token = write_request(request, query)
+        except OSError as ex:
+            dbg('promptline: unable to write agent request: %s' % ex)
+            return False
+        self.agent_token, self.agent_started = token, False
+        self.suggestion = None
+        self.ghost.clear()
+        # Ctrl+E Ctrl+U empties the line in bash and zsh; the leading space
+        # keeps the launcher out of history
+        self.vte.feed_child(b'\x05\x15')
+        self.vte.feed_child((' %s %s\n' % (AGENT_LAUNCHER, token)).encode())
+        return True
+
+    def agent_finished(self):
+        """The agent exited: type anything it left for the prompt"""
+        token, self.agent_token = self.agent_token, None
+        text = take_prefill(token)
+        if text:
+            self.vte.feed_child(text.split('\n')[0].encode('utf-8'))
+
+    def shell(self):
+        """The shell running in this terminal"""
+        pid = getattr(self.terminal, 'pid', None)
+        if pid:
+            try:
+                return os.readlink('/proc/%d/exe' % pid)
+            except OSError:
+                pass
+        return os.environ.get('SHELL')

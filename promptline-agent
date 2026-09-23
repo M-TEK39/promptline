@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+# Terminator by Chris Jones <cmsj@tenshu.net>
+# GPL v2 only
+"""promptline-agent - runs @agent requests; started by Promptline's shell
+integration when you press Enter on a line beginning with @agent"""
+
+import sys
+
+from terminatorlib.promptline.agent.cli import main
+
+if __name__ == '__main__':
+    sys.exit(main())

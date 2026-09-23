@@ -9,19 +9,22 @@ argv follows Terminator's spawn convention: argv[0] is the name the shell
 sees as $0, and '-l' there makes it a login shell.
 
 >>> SHELL_DIR = '/pl'
->>> inject('/bin/bash', ['/bin/bash'], ['TERM=xterm'], environ={}, shell_dir=SHELL_DIR)
+>>> inject('/bin/bash', ['/bin/bash'], ['TERM=xterm'], environ={}, shell_dir=SHELL_DIR, extra_env=[])
 (['/bin/bash', '--rcfile', '/pl/promptline.bash'], ['TERM=xterm', 'PROMPTLINE=1'])
->>> inject('/bin/bash', ['-l'], [], environ={}, shell_dir=SHELL_DIR)
+>>> inject('/bin/bash', ['-l'], [], environ={}, shell_dir=SHELL_DIR, extra_env=[])
 (['bash', '--rcfile', '/pl/promptline.bash'], ['PROMPTLINE=1', 'PROMPTLINE_BASH_LOGIN=1'])
->>> inject('/usr/bin/zsh', ['-l'], [], environ={'ZDOTDIR': '/z'}, shell_dir=SHELL_DIR)
+>>> inject('/usr/bin/zsh', ['-l'], [], environ={'ZDOTDIR': '/z'}, shell_dir=SHELL_DIR, extra_env=[])
 (['-l'], ['PROMPTLINE=1', 'ZDOTDIR=/pl/zdotdir', 'PROMPTLINE_ZDOTDIR=/z'])
->>> inject('/usr/bin/zsh', ['/usr/bin/zsh'], [], environ={}, shell_dir=SHELL_DIR)
-(['/usr/bin/zsh'], ['PROMPTLINE=1', 'ZDOTDIR=/pl/zdotdir'])
+>>> inject('/usr/bin/zsh', ['/usr/bin/zsh'], [], environ={}, shell_dir=SHELL_DIR, extra_env=['A=1'])
+(['/usr/bin/zsh'], ['PROMPTLINE=1', 'A=1', 'ZDOTDIR=/pl/zdotdir'])
 >>> inject('/usr/bin/fish', ['/usr/bin/fish'], [], environ={}, shell_dir=SHELL_DIR)
 (['/usr/bin/fish'], [])
 """
 
 import os
+import sys
+
+from . import agent
 
 SHELL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'shell')
 
@@ -31,11 +34,22 @@ def supported(shell):
     return os.path.basename(shell) in ('bash', 'zsh')
 
 
-def inject(shell, argv, envv, environ=None, shell_dir=None):
+def agent_env():
+    """Environment the shell's _promptline_agent launcher needs"""
+    program = agent.agent_program()
+    if program is None:
+        return []
+    return ['PROMPTLINE_PYTHON=%s' % sys.executable,
+            'PROMPTLINE_AGENT=%s' % program,
+            'PROMPTLINE_RUNTIME=%s' % agent.runtime_dir()]
+
+
+def inject(shell, argv, envv, environ=None, shell_dir=None, extra_env=None):
     """Return (argv, envv) that start shell with Promptline's integration.
 
     envv is the extra environment Terminator passes to the child; environ is
-    the environment it inherits (defaults to os.environ).
+    the environment it inherits (defaults to os.environ). extra_env defaults
+    to what @agent needs.
     """
     if environ is None:
         environ = os.environ
@@ -47,6 +61,7 @@ def inject(shell, argv, envv, environ=None, shell_dir=None):
 
     argv = list(argv)
     envv = list(envv) + ['PROMPTLINE=1']
+    envv += agent_env() if extra_env is None else extra_env
     login = bool(argv) and argv[0] == '-l'
 
     if name == 'bash':

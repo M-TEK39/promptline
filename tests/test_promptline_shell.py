@@ -265,6 +265,12 @@ def test_prediction(home, history, fake_openai):
     assert wait_for(lambda: controller.suggestion == ('', 'ls -la'))
     assert 'Nothing typed yet' in fake_openai.prompt()
 
+    # An @agent question is never sent for prediction
+    asked = len(fake_openai.requests)
+    typed(terminal, session, controller, '@agent why is it slow')
+    time.sleep(0.6)
+    assert len(fake_openai.requests) == asked
+
 
 def test_prediction_auth_failure(home, history, fake_openai):
     terminal, session, controller = start_shell(
@@ -276,3 +282,112 @@ def test_prediction_auth_failure(home, history, fake_openai):
     typed(terminal, session, controller, 'a')
     time.sleep(0.5)
     assert len(fake_openai.requests) == asked
+
+
+def screen_text(terminal):
+    vte = terminal.vte
+    row = vte.get_cursor_position()[1]
+    return vte.get_text_range_format(Vte.Format.TEXT, 0, 0, row,
+                                     vte.get_column_count())[0]
+
+
+@pytest.fixture
+def agent_setup(monkeypatch, tmp_path, fake_openai):
+    """Run the real promptline-agent against the fake server, with its
+    runtime files in a temporary directory"""
+    import os
+    from terminatorlib.promptline import agent as agent_module
+    program = os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), 'promptline-agent')
+    runtime = tmp_path / 'runtime'
+    runtime.mkdir()
+    monkeypatch.setenv('XDG_RUNTIME_DIR', str(runtime))
+    monkeypatch.setenv('PYTHONPATH', os.path.dirname(program))
+    monkeypatch.setattr(agent_module, 'agent_program', lambda: program)
+    monkeypatch.setattr(controller_module, 'agent_program', lambda: program)
+    # Prediction would share the fake server; it's tested separately
+    monkeypatch.setattr(controller_module.promptline, 'enabled',
+                        lambda feature=None: feature != 'llm_autocomplete')
+    monkeypatch.setattr(controller_module, 'provider_settings',
+                        lambda purpose: {
+                            'promptline_provider': 'openai',
+                            'promptline_base_url': fake_openai.url,
+                            'promptline_api_key_env': '',
+                            'promptline_api_key_file': '',
+                            'model': 'agent-model', 'reasoning': ''})
+    return fake_openai
+
+
+def tool_call(name, **args):
+    import json
+    return {'id': 'call_%s' % name, 'type': 'function',
+            'function': {'name': name, 'arguments': json.dumps(args)}}
+
+
+@pytest.mark.parametrize('name', SHELLS)
+def test_agent(name, home, history, agent_setup):
+    import json
+    server = agent_setup
+    steps = [
+        {'tool_calls': [tool_call('run_command', command='echo agent-ran',
+                                  reason='check something')]},
+        {'tool_calls': [tool_call('place_on_prompt', command='cd /tmp')]},
+        {'content': 'All done.'},
+    ]
+
+    # Let the fake server return whole messages, not just text
+    original = server.httpd.RequestHandlerClass.do_POST
+
+    def do_POST(handler):
+        length = int(handler.headers['Content-Length'])
+        body = json.loads(handler.rfile.read(length))
+        server.requests.append(body)
+        message = dict({'role': 'assistant', 'content': None},
+                       **steps[len(server.requests) - 1])
+        data = json.dumps({'choices': [{'message': message}]}).encode()
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'application/json')
+        handler.send_header('Content-Length', str(len(data)))
+        handler.end_headers()
+        handler.wfile.write(data)
+    server.httpd.RequestHandlerClass.do_POST = do_POST
+    try:
+        terminal, session, controller = start_shell(
+            shutil.which(name), str(home), {'ZDOTDIR': str(home / 'zdot')},
+            with_controller=True)
+        run(terminal, session, 'ls /nonexistent-dir')
+
+        typed(terminal, session, controller, "@agent what's wrong?")
+        assert press(controller, Gdk.KEY_Return)
+        assert wait_for(lambda: '[a]pprove' in screen_text(terminal)), \
+            screen_text(terminal)
+        terminal.vte.feed_child(b'a')
+        assert wait_for(lambda: session.state == session.PROMPT and
+                        session.current_input() is not None and
+                        session.current_input().text == 'cd /tmp',
+                        timeout=20), screen_text(terminal)
+
+        screen = screen_text(terminal)
+        assert "@agent what's wrong?" in screen
+        assert '_promptline_agent' not in screen
+        assert 'agent-ran' in screen and 'All done.' in screen
+
+        first = server.requests[0]
+        assert first['model'] == 'agent-model'
+        assert [t['function']['name'] for t in first['tools']] == \
+            ['run_command', 'place_on_prompt']
+        request = first['messages'][-1]['content']
+        assert "Request: what's wrong?" in request
+        assert 'ls /nonexistent-dir' in request and '[exit 2]' in request
+        result = json.loads(server.requests[1]['messages'][-1]['content'])
+        assert result == {'exit_status': 0, 'output': 'agent-ran'}
+
+        # History has the question, not the launcher; the agent's run isn't
+        # learned as a command
+        terminal.vte.feed_child(b'\x15')
+        record = run(terminal, session, 'fc -ln -5')
+        assert "@agent what's wrong?" in record.output
+        assert '_promptline_agent' not in record.output
+        assert history.best('_promptline') is None
+    finally:
+        server.httpd.RequestHandlerClass.do_POST = original

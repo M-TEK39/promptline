@@ -8,11 +8,12 @@ a VTE too old to support it) the terminal behaves exactly like upstream.
 """
 
 from ..config import Config
-from . import marks
 
 
 def available():
     """Return True if this VTE can deliver Promptline's shell marks"""
+    # Imported here so the agent CLI can use this package without VTE
+    from . import marks
     return marks.INSTALLED
 
 

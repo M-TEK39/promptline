@@ -52,19 +52,32 @@ def resolve_api_key(config, environ=None):
     return None
 
 
-def make_provider(purpose):
+SETTINGS = ('provider', 'base_url', 'api_key_env', 'api_key_file')
+
+
+def provider_settings(purpose, config=None):
+    """The provider settings for 'autocomplete' or 'agent' as a plain dict
+    (no key in it), so they can be handed to the agent process"""
+    config = Config() if config is None else config
+    settings = dict(('promptline_' + name, config['promptline_' + name])
+                    for name in SETTINGS)
+    settings['model'] = config['promptline_%s_model' % purpose]
+    settings['reasoning'] = config['promptline_%s_reasoning' % purpose]
+    return settings
+
+
+def make_provider(purpose, settings=None):
     """Return a provider for 'autocomplete' or 'agent', or None if one
     isn't configured (no key for a hosted API)"""
-    config = Config()
-    name = config['promptline_provider']
+    settings = provider_settings(purpose) if settings is None else settings
+    name = settings['promptline_provider']
     if name != 'openai':
         err('promptline: unknown provider %r' % name)
         return None
     from .openai import OpenAIProvider
-    base_url = config['promptline_base_url']
-    key = resolve_api_key(config)
+    base_url = settings['promptline_base_url']
+    key = resolve_api_key(settings)
     if key is None and OpenAIProvider.needs_key(base_url):
         return None
-    return OpenAIProvider(base_url, key,
-                          config['promptline_%s_model' % purpose],
-                          config['promptline_%s_reasoning' % purpose])
+    return OpenAIProvider(base_url, key, settings['model'],
+                          settings['reasoning'])

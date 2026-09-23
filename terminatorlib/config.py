@@ -136,6 +136,8 @@ DEFAULTS = {
             'promptline_api_key_file': '',
             'promptline_autocomplete_model': 'gpt-6-luna',
             'promptline_autocomplete_reasoning': 'xhigh',
+            'promptline_agent_model': 'gpt-6-luna',
+            'promptline_agent_reasoning': 'xhigh',
         },
         'keybindings': {
             'zoom'             : '',

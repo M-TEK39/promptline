@@ -1,0 +1,129 @@
+# Terminator by Chris Jones <cmsj@tenshu.net>
+# GPL v2 only
+"""loop.py - the agent's tool-calling loop
+
+The loop is independent of any terminal: it talks to the user through a UI
+object and runs commands through an executor, so it is tested with fakes.
+
+UI methods: thinking(fn) runs fn while showing progress and returns its
+result; say(text); approve(command, reason) -> ('approve'|'cancel',
+command); running(command); finished(status); note(text).
+
+>>> class Provider(object):
+...     def __init__(self, replies): self.replies = list(replies)
+...     def chat(self, messages, tools): return self.replies.pop(0)
+>>> class UI(object):
+...     def __init__(self, answer): self.answer, self.log = answer, []
+...     def thinking(self, fn): return fn()
+...     def say(self, text): self.log.append(('say', text))
+...     def approve(self, command, reason):
+...         self.log.append(('approve?', command, reason)); return self.answer
+...     def running(self, command): self.log.append(('run', command))
+...     def finished(self, status): pass
+...     def note(self, text): self.log.append(('note', text))
+>>> def call(name, **args):
+...     return {'role': 'assistant', 'content': None, 'tool_calls': [
+...         {'id': 'c1', 'type': 'function', 'function': {
+...          'name': name, 'arguments': json.dumps(args)}}]}
+>>> def executor(command): return 0, '3000/tcp: node'
+>>> provider = Provider([call('run_command', command='lsof -i :3000',
+...                           reason='find the process'),
+...                      {'role': 'assistant', 'content': 'node holds it.'}])
+>>> ui = UI(('approve', 'lsof -i :3000'))
+>>> agent = Agent(provider, ui, executor)
+>>> agent.run({'role': 'user', 'content': 'port 3000?'})
+>>> ui.log
+[('approve?', 'lsof -i :3000', 'find the process'), ('run', 'lsof -i :3000'), ('say', 'node holds it.')]
+>>> json.loads(agent.messages[2]['content'])
+{'exit_status': 0, 'output': '3000/tcp: node'}
+
+Declining is reported back to the model:
+
+>>> provider = Provider([call('run_command', command='rm -rf /tmp/x',
+...                           reason='clean up'),
+...                      {'role': 'assistant', 'content': 'OK, left it.'}])
+>>> agent = Agent(provider, UI(('cancel', 'rm -rf /tmp/x')), executor)
+>>> agent.run({'role': 'user', 'content': 'clean'})
+>>> agent.messages[2]['content']
+'The user declined to run this command.'
+
+place_on_prompt remembers the command for the user's prompt:
+
+>>> provider = Provider([call('place_on_prompt', command='cd /srv/app'),
+...                      {'role': 'assistant', 'content': 'Done.'}])
+>>> agent = Agent(provider, UI(None), executor)
+>>> agent.run({'role': 'user', 'content': 'go to the app'})
+>>> agent.prefill
+'cd /srv/app'
+"""
+
+import json
+
+from .approval import ALLOW, DENY, AskEveryTime
+from .tools import TOOLS
+
+MAX_STEPS = 25
+
+
+class Agent(object):
+    def __init__(self, provider, ui, executor, policy=None, messages=None,
+                 max_steps=MAX_STEPS):
+        self.provider = provider
+        self.ui = ui
+        self.executor = executor
+        self.policy = policy or AskEveryTime()
+        self.messages = list(messages or [])
+        self.max_steps = max_steps
+        self.prefill = None
+
+    def run(self, user_message):
+        """Handle one request from the user, until the model stops calling
+        tools"""
+        self.messages.append(user_message)
+        for _step in range(self.max_steps):
+            reply = self.ui.thinking(
+                lambda: self.provider.chat(self.messages, TOOLS))
+            self.messages.append(reply)
+            if reply.get('content'):
+                self.ui.say(reply['content'].strip())
+            calls = reply.get('tool_calls') or []
+            if not calls:
+                return
+            for call in calls:
+                self.messages.append({'role': 'tool',
+                                      'tool_call_id': call.get('id'),
+                                      'content': self.handle(call)})
+        self.ui.note('Stopped after %d steps.' % self.max_steps)
+
+    def handle(self, call):
+        """Carry out one tool call; returns the text sent back to the model"""
+        function = call.get('function', {})
+        name = function.get('name')
+        try:
+            args = json.loads(function.get('arguments') or '{}')
+        except ValueError:
+            return 'Error: the arguments were not valid JSON.'
+        command = (args.get('command') or '').strip()
+        if not command:
+            return 'Error: no command given.'
+
+        if name == 'place_on_prompt':
+            self.prefill = command
+            self.ui.note('Will be placed on your prompt: %s' % command)
+            return 'The command will be typed at the user\'s prompt.'
+
+        if name != 'run_command':
+            return 'Error: there is no tool called %r.' % name
+        decision = self.policy.decide(command)
+        if decision == DENY:
+            return 'This command is not allowed.'
+        if decision != ALLOW:
+            answer, command = self.ui.approve(command,
+                                              args.get('reason', ''))
+            self.policy.remember(command, answer == 'approve')
+            if answer != 'approve':
+                return 'The user declined to run this command.'
+        self.ui.running(command)
+        status, output = self.executor(command)
+        self.ui.finished(status)
+        return json.dumps({'exit_status': status, 'output': output})

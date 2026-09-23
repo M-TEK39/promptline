@@ -60,4 +60,21 @@ _promptline_setup() {
     _promptline_report_cwd
 }
 
+# Terminator runs this when Enter is pressed on an "@agent ..." line: put
+# what the user typed into history, then start the agent
+_promptline_agent() {
+    local request=$PROMPTLINE_RUNTIME/$1
+    if [[ -r $request.query ]]; then
+        builtin print -rs -- "@agent $(<$request.query)"
+        command rm -f -- $request.query
+    fi
+    command "$PROMPTLINE_PYTHON" "$PROMPTLINE_AGENT" $request.json
+}
+
+# ...and keep the launcher line itself out of history
+_promptline_addhistory() {
+    [[ $1 != ' _promptline_agent '* ]]
+}
+zshaddhistory_functions+=(_promptline_addhistory)
+
 precmd_functions+=(_promptline_setup)

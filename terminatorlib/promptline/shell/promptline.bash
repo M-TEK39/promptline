@@ -62,6 +62,19 @@ if [[ $- == *i* && -z $_PROMPTLINE_LOADED && ${BASH_VERSINFO[0]} -ge 4 ]]; then
         return "$ret"
     }
 
+    # Terminator runs this when Enter is pressed on an "@agent ..." line: put
+    # what the user typed into history, then start the agent
+    _promptline_agent() {
+        local request=$PROMPTLINE_RUNTIME/$1
+        if [[ -r $request.query ]]; then
+            builtin history -s "@agent $(<"$request.query")"
+            command rm -f -- "$request.query"
+        fi
+        command "$PROMPTLINE_PYTHON" "$PROMPTLINE_AGENT" "$request.json"
+    }
+    # ...and keep the launcher line itself out of history
+    HISTIGNORE="${HISTIGNORE:+$HISTIGNORE:}[ ]_promptline_agent *"
+
     _promptline_input_mark='\[\e]666;vte.ext.promptline.input=1\e\\\]'
     # bash can't cheaply tell us the command text; the terminal reads it
     # off the screen. PS0 is printed just before each command runs; prepend,

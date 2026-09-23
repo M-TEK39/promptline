@@ -194,3 +194,21 @@ Each phase ends with passing `xvfb-run -a pytest` and a manual run of
   nothing else is drawn after the cursor, so the shell plugin wins while it
   has a history match. To let prediction lead, skip the plugin when
   `$PROMPTLINE` is set; Promptline's own history tier covers the same ground.
+- **Phase 4 done: `@agent`.** Enter on a line starting with `@agent` is
+  caught by Terminator, not the shell. The raw text is read off the screen,
+  so quotes and `?` are safe. Terminator writes a request (question,
+  context snapshot, provider settings, never the key) to
+  `$XDG_RUNTIME_DIR/promptline/`. That works without D-Bus, which `-u`
+  disables. It then clears the line and runs ` _promptline_agent TOKEN`.
+  That shell function records `@agent <question>` in history (the
+  launcher line itself is kept out) and runs `promptline-agent`. The
+  agent redraws the line as the user typed it, then works in the terminal
+  like any program. `run_command` always asks Approve/Edit/Cancel
+  (`approval.AskEveryTime`; future policies plug in there).
+  `place_on_prompt` types a command at the next prompt. Conversations
+  persist per terminal for 30 idle minutes.
+- **OpenAI API finding:** `gpt-6-luna` rejects tools combined with
+  `reasoning_effort` on Chat Completions, so tool requests to
+  api.openai.com use the Responses API (`store: false`, encrypted
+  reasoning carried between turns). Verified live, including a follow-up
+  turn. Prediction and local servers stay on Chat Completions.
