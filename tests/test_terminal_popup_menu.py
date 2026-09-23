@@ -10,7 +10,7 @@ gi.require_version("Gtk", "3.0")
 
 from gi.repository import Gtk
 
-from terminatorlib.terminal_popup_menu import TerminalPopupMenu
+from promptlinelib.terminal_popup_menu import TerminalPopupMenu
 
 
 class FakeContainer:

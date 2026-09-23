@@ -14,17 +14,17 @@ gi.require_version('Gdk', '3.0')
 gi.require_version('Vte', '2.91')
 from gi.repository import Gdk, GLib, Gtk, Vte
 
-from terminatorlib.promptline import controller as controller_module
-from terminatorlib.promptline import marks, shellint
-from terminatorlib.promptline.controller import Controller
-from terminatorlib.promptline.suggest.history import HistoryStore
+from promptlinelib.promptline import controller as controller_module
+from promptlinelib.promptline import marks, shellint
+from promptlinelib.promptline.controller import Controller
+from promptlinelib.promptline.suggest.history import HistoryStore
 
 pytestmark = pytest.mark.skipif(not marks.INSTALLED,
                                 reason='VTE too old for termprops')
 
 
 class FakeTerminal(object):
-    """Just enough of terminatorlib.terminal.Terminal for a Controller"""
+    """Just enough of promptlinelib.terminal.Terminal for a Controller"""
     def __init__(self):
         self.vte = Vte.Terminal()
         self.fgcolor_active = Gdk.RGBA(1, 1, 1, 1)
@@ -225,7 +225,7 @@ class FakeOpenAI(object):
 
 @pytest.fixture
 def fake_openai(monkeypatch):
-    from terminatorlib.promptline.providers.openai import OpenAIProvider
+    from promptlinelib.promptline.providers.openai import OpenAIProvider
     server = FakeOpenAI()
     monkeypatch.setattr(controller_module, 'make_provider',
                         lambda purpose: OpenAIProvider(server.url, None,
@@ -296,7 +296,7 @@ def agent_setup(monkeypatch, tmp_path, fake_openai):
     """Run the real promptline-agent against the fake server, with its
     runtime files in a temporary directory"""
     import os
-    from terminatorlib.promptline import agent as agent_module
+    from promptlinelib.promptline import agent as agent_module
     program = os.path.join(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__))), 'promptline-agent')
     runtime = tmp_path / 'runtime'
@@ -391,3 +391,4 @@ def test_agent(name, home, history, agent_setup):
         assert history.best('_promptline') is None
     finally:
         server.httpd.RequestHandlerClass.do_POST = original
+

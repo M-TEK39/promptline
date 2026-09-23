@@ -6,7 +6,7 @@ integration when you press Enter on a line beginning with @agent"""
 
 import sys
 
-from terminatorlib.promptline.agent.cli import main
+from promptlinelib.promptline.agent.cli import main
 
 if __name__ == '__main__':
     sys.exit(main())

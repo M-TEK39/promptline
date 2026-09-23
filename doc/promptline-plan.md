@@ -54,11 +54,11 @@ recall, Tab completion, paste and Ctrl-W are all handled for free.
 
 | V1 plan item / Wave concept | Class | V2 home | Notes |
 | --- | --- | --- | --- |
-| Promptline branding | ADAPT (defer) | `terminatorlib/version.py`, desktop file, About, window title | Keep internal names (`terminatorlib`, config path) to stay rebase-friendly; user-visible rename in one late phase |
-| OpenAI provider (demo) | REWRITE | `terminatorlib/promptline/providers/openai.py` | stdlib `urllib` + SSE parsing, no new deps; Chat Completions shape so one adapter also covers Ollama/LM Studio/vLLM via `base_url` |
+| Promptline branding | ADAPT (defer) | `promptlinelib/version.py`, desktop file, About, window title | Keep internal names (`promptlinelib`, config path) to stay rebase-friendly; user-visible rename in one late phase |
+| OpenAI provider (demo) | REWRITE | `promptlinelib/promptline/providers/openai.py` | stdlib `urllib` + SSE parsing, no new deps; Chat Completions shape so one adapter also covers Ollama/LM Studio/vLLM via `base_url` |
 | Provider/model config | ADAPT | `config.py` `DEFAULTS['global_config']` (`promptline_*` keys), later a Promptline tab in `prefseditor.py` | API key read from env var named in config (default `OPENAI_API_KEY`); never written to config |
 | Multi-provider abstraction | REWRITE (small) | `providers/base.py` | One `Provider` protocol: `chat(messages, tools, stream) -> events`. No Wave-style mode/preset system |
-| Shell integration (Wave OSC 16162 A/C/D/M/I + OSC 7) | ADAPT | `terminatorlib/promptline/shell/{bash,zsh,fish}` + spawn hook in `Terminal.spawn_child` | Emit `OSC 666 vte.ext.promptline.mark=A/B/C/D`, `…cmd=<b64>`, `…exit=<n>`, plus OSC 7. Opt-out setting |
+| Shell integration (Wave OSC 16162 A/C/D/M/I + OSC 7) | ADAPT | `promptlinelib/promptline/shell/{bash,zsh,fish}` + spawn hook in `Terminal.spawn_child` | Emit `OSC 666 vte.ext.promptline.mark=A/B/C/D`, `…cmd=<b64>`, `…exit=<n>`, plus OSC 7. Opt-out setting |
 | Shadow keystroke buffer | DROP | — | Replaced by reading the input line from VTE (see above) |
 | Instant local autocomplete (history, paths, heuristics) | PORT | `promptline/suggest/{history,paths,rank}.py` (pure Python, no GTK) | Prefix-only suggestions (ghost text must be a suffix of what's typed) |
 | Debounced LLM autocomplete | PORT | `promptline/suggest/llm.py` + worker thread → `GLib.idle_add` | Opt-in, cancelled on every keystroke, result dropped if it no longer prefixes the input |
@@ -77,7 +77,7 @@ recall, Tab completion, paste and Ctrl-W are all handled for free.
 ## 3. Architecture
 
 ```
-terminatorlib/promptline/        # all new code lives here (GPLv2 headers)
+promptlinelib/promptline/        # all new code lives here (GPLv2 headers)
   __init__.py      feature detection: VTE termprops available? config enabled?
   settings.py      typed view over Config()['promptline_*']
   shellint.py      termprop install, mark parsing, spawn arg/env wrapping

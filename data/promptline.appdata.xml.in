@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2013 Stephen Boddy <stephen.j.boddy@gmail.com> -->
+<component type="desktop">
+ <id>promptline.desktop</id>
+ <metadata_license>CC0-1.0</metadata_license>
+ <project_license>GPL-2.0-only</project_license>
+ <_name>Promptline</_name>
+ <_summary>A terminal with command prediction and an on-request agent</_summary>
+ <description>
+  <_p>
+   Promptline is a traditional terminal that predicts the command you are
+   about to type and, when you ask it with @agent, works on a task for you
+   using what is already on your screen.
+  </_p>
+  <ul>
+   <_li>Inline suggestions from your history and paths, instant and offline</_li>
+   <_li>Optional model-based prediction using the directory, recent commands and their output</_li>
+   <_li>@agent: ask a question or give a task from the prompt; every command it runs needs your approval</_li>
+   <_li>With the AI features off, it is simply Terminator</_li>
+  </ul>
+  <_p>
+   Promptline is based on Terminator, and keeps its grid layouts, tabs,
+   broadcast typing, profiles and plugins.
+  </_p>
+ </description>
+ <url type="homepage">https://github.com/gnome-terminator/terminator</url>
+ <updatecontact>terminator@lazyfrosch.de</updatecontact>
+ <developer_name>The Terminator Team</developer_name>
+</component>

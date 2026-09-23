@@ -19,7 +19,7 @@ class MessageDialogToken:
 
 
 def detect_close_message_dialog(prefs_editor, message_dialog_token):
-    # type: (terminatorlib.prefseditor.PrefsEditor, MessageDialogToken) -> bool
+    # type: (promptlinelib.prefseditor.PrefsEditor, MessageDialogToken) -> bool
     """
     Checks whether a message dialog is displayed over the Preferences
     window and if so, closes it. This function is intended to be used with
@@ -36,12 +36,12 @@ def reset_config_keybindings():
     """
     Resets key bindings to the default.
 
-    Key bindings are stored in `terminatorlib.config.ConfigBase`,
+    Key bindings are stored in `promptlinelib.config.ConfigBase`,
     which is implemented using the Borg design pattern - this means
     that simply recreating a `ConfigBase` instance won't reset the key
     bindings to the default.
     """
-    from terminatorlib import config
+    from promptlinelib import config
 
     conf_base = config.ConfigBase()
     conf_base.keybindings = None
@@ -53,7 +53,7 @@ def test_non_empty_default_keybinding_accels_are_distinct():
     Tests that all non-empty key binding accelerators defined in
     the default config are distinct.
     """
-    from terminatorlib import config
+    from promptlinelib import config
 
     all_default_accelerators = [
         tuple(Gtk.accelerator_parse(accel))
@@ -89,8 +89,8 @@ def test_message_dialog_is_shown_on_duplicate_accel_assignment(
     is attempted to be assigned to a different action in `Preferences > Keybindings`,
     and doesn't appear if a key binding accelerator is not a duplicate.
     """
-    from terminatorlib import terminal
-    from terminatorlib import prefseditor
+    from promptlinelib import terminal
+    from promptlinelib import prefseditor
 
     path, key, mods, code = accel_params
 
@@ -135,9 +135,9 @@ def test_duplicate_accels_not_possible_to_set(accel_params):
     which is already defined in the config cannot be used to refer to more than
     one action.
     """
-    from terminatorlib import config
-    from terminatorlib import terminal
-    from terminatorlib import prefseditor
+    from promptlinelib import config
+    from promptlinelib import terminal
+    from promptlinelib import prefseditor
 
     path, key, mods, code = accel_params
 
@@ -226,8 +226,8 @@ def test_keybinding_edit_produce_expected_accels(
     Tests that editing a key binding using a predefined key combination
     `input_key_params` produces the expected accelerator.
     """
-    from terminatorlib import terminal
-    from terminatorlib import prefseditor
+    from promptlinelib import terminal
+    from promptlinelib import prefseditor
 
     term = terminal.Terminal()
     prefs_editor = prefseditor.PrefsEditor(term=term)
@@ -273,8 +273,8 @@ def test_keybinding_successfully_reassigned_after_clearing(accel_params):
     Tests that a key binding is successfully reassigned after it has been cleared,
     that is no error is thrown at any stage.
     """
-    from terminatorlib import terminal
-    from terminatorlib import prefseditor
+    from promptlinelib import terminal
+    from promptlinelib import prefseditor
 
     term = terminal.Terminal()
     prefs_editor = prefseditor.PrefsEditor(term=term)

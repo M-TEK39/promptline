@@ -8,7 +8,7 @@ import gi
 sys.path.insert(0, os.path.realpath(os.path.join(os.path.dirname(__file__), "..")))
 gi.require_version("Gtk", "3.0")
 
-from terminatorlib.window import WindowTitle
+from promptlinelib.window import WindowTitle
 
 
 class FakeWindow:

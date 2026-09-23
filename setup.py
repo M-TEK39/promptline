@@ -14,11 +14,11 @@ import sys
 import subprocess
 import platform
 
-from terminatorlib.version import APP_NAME, APP_VERSION
+from promptlinelib.version import APP_NAME, APP_VERSION
 
 PO_DIR = 'po'
 MO_DIR = os.path.join('build', 'mo')
-CSS_DIR = os.path.join('terminatorlib', 'themes')
+CSS_DIR = os.path.join('promptlinelib', 'themes')
 
 if sys.version_info < (3, 0):
     PYTEST_VERSION = '<5'
@@ -45,7 +45,7 @@ class BuildData(build):
       # Build the translations
       for po in glob.glob (os.path.join (PO_DIR, '*.po')):
         lang = os.path.basename(po[:-3])
-        mo = os.path.join(MO_DIR, lang, 'terminator.mo')
+        mo = os.path.join(MO_DIR, lang, APP_NAME + '.mo')
 
         directory = os.path.dirname(mo)
         if not os.path.exists(directory):
@@ -65,8 +65,8 @@ class BuildData(build):
 
       TOP_BUILDDIR='.'
       INTLTOOL_MERGE='intltool-merge'
-    desktop_in='data/terminator.desktop.in'
-    desktop_data='data/terminator.desktop'
+    desktop_in='data/promptline.desktop.in'
+    desktop_data='data/promptline.desktop'
     rc = None
     if not self.distribution.without_gettext:
       rc = os.system ("C_ALL=C " + INTLTOOL_MERGE + " -d -u -c " + TOP_BUILDDIR +
@@ -77,8 +77,8 @@ class BuildData(build):
       with open(desktop_in) as file_in, open(desktop_data, 'w') as file_data:
         [file_data.write(line.lstrip('_')) for line in file_in]
 
-    appdata_in='data/terminator.appdata.xml.in'
-    appdata_data='data/terminator.metainfo.xml'
+    appdata_in='data/promptline.appdata.xml.in'
+    appdata_data='data/promptline.metainfo.xml'
     rc = None
     if not self.distribution.without_gettext:
       rc = os.system ("C_ALL=C " + INTLTOOL_MERGE + " -x -u -c " + TOP_BUILDDIR +
@@ -157,7 +157,7 @@ class InstallData(install_data):
     data_files = []
 
     if not self.distribution.without_gettext:
-      for mo in glob.glob (os.path.join (MO_DIR, '*', 'terminator.mo')):
+      for mo in glob.glob (os.path.join (MO_DIR, '*', APP_NAME + '.mo')):
        lang = os.path.basename(os.path.dirname(mo))
        dest = os.path.join('share', 'locale', lang, 'LC_MESSAGES')
        data_files.append((dest, [mo]))
@@ -169,7 +169,7 @@ class InstallData(install_data):
 
     for css_dir in glob.glob (os.path.join (CSS_DIR, '*')):
        srce = glob.glob (os.path.join(css_dir, 'gtk-3.0', 'apps', '*.css'))
-       dest = os.path.join('share', 'terminator', css_dir, 'gtk-3.0', 'apps')
+       dest = os.path.join('share', APP_NAME, css_dir, 'gtk-3.0', 'apps')
        data_files.append((dest, srce))
 
     return data_files
@@ -186,18 +186,19 @@ test_deps = [
 
 setup(name=APP_NAME,
       version=APP_VERSION,
-      description='Terminator, the robot future of terminals',
+      description='Promptline, a terminal with inline command prediction and an '
+                  'on-request agent (based on Terminator)',
       author='Chris Jones',
       author_email='cmsj@tenshu.net',
-      url='https://github.com/gnome-terminator/terminator',
+      url='https://github.com/M-TEK39/Promptline',
       license='GNU GPL v2',
-      scripts=['terminator', 'remotinator', 'promptline-agent'],
+      scripts=['promptline', 'promptline-remote', 'promptline-agent'],
       data_files=[
-                  ('share/applications', ['data/terminator.desktop']),
-                  ('share/metainfo', ['data/terminator.metainfo.xml']),
-                  (os.path.join(man_dir, 'man1'), ['doc/terminator.1']),
-                  (os.path.join(man_dir, 'man5'), ['doc/terminator_config.5']),
-                  ('share/pixmaps', ['data/icons/hicolor/48x48/apps/terminator.png']),
+                  ('share/applications', ['data/promptline.desktop']),
+                  ('share/metainfo', ['data/promptline.metainfo.xml']),
+                  (os.path.join(man_dir, 'man1'), ['doc/promptline.1']),
+                  (os.path.join(man_dir, 'man5'), ['doc/promptline_config.5']),
+                  ('share/pixmaps', ['data/icons/hicolor/48x48/apps/promptline.png']),
                   ('share/icons/hicolor/scalable/apps', glob.glob('data/icons/hicolor/scalable/apps/*.svg')),
                   ('share/icons/hicolor/16x16/apps', glob.glob('data/icons/hicolor/16x16/apps/*.png')),
                   ('share/icons/hicolor/22x22/apps', glob.glob('data/icons/hicolor/22x22/apps/*.png')),
@@ -216,12 +217,12 @@ setup(name=APP_NAME,
                   ('share/icons/HighContrast/16x16/status', glob.glob('data/icons/HighContrast/16x16/status/*.png')),
                  ],
       packages=[
-          'terminatorlib',
-          'terminatorlib.plugins',
-          'terminatorlib.promptline',
-          'terminatorlib.promptline.suggest',
-          'terminatorlib.promptline.providers',
-          'terminatorlib.promptline.agent',
+          'promptlinelib',
+          'promptlinelib.plugins',
+          'promptlinelib.promptline',
+          'promptlinelib.promptline.suggest',
+          'promptlinelib.promptline.providers',
+          'promptlinelib.promptline.agent',
       ],
       install_requires=[
           'pycairo',
@@ -231,8 +232,8 @@ setup(name=APP_NAME,
           'psutil',
       ],
       extras_require={'test': test_deps},
-      package_data={'terminatorlib': ['preferences.glade', 'layoutlauncher.glade'],
-                    'terminatorlib.promptline': ['shell/promptline.bash',
+      package_data={'promptlinelib': ['preferences.glade', 'layoutlauncher.glade'],
+                    'promptlinelib.promptline': ['shell/promptline.bash',
                                                  'shell/promptline.zsh',
                                                  'shell/zdotdir/.zshenv']},
       cmdclass={'build': BuildData, 'install_data': InstallData, 'uninstall': Uninstall},

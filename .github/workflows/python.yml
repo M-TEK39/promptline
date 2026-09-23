@@ -40,7 +40,7 @@ jobs:
         xvfb
 
     - name: Compile all scripts
-      run: python -m compileall -f terminatorlib/ tests/ remotinator terminator
+      run: python -m compileall -f promptlinelib/ tests/ promptline-remote promptline promptline-agent
 
     - name: Run tests
       run: |

@@ -29,7 +29,7 @@
 
 """
 
-from terminatorlib.borg import Borg
+from promptlinelib.borg import Borg
 
 
 class TestBorg(Borg):
