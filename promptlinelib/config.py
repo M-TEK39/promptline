@@ -296,6 +296,7 @@ DEFAULTS = {
         },
 }
 DEFAULTS['global_config'].update(promptline_defaults.GLOBAL_DEFAULTS)
+DEFAULTS['profiles']['default'].update(promptline_defaults.PROFILE_DEFAULTS)
 
 class Config(object):
     """Class to provide a slightly richer config API above ConfigBase"""

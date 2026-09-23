@@ -35,13 +35,13 @@ try:
     from gi.repository import Gtk, Gdk, GLib
 
     if Gdk.Display.get_default() == None:
-        print('You need to run terminator in an X environment. ' \
+        print('You need to run Promptline in an X environment. ' \
               'Make sure $DISPLAY is properly set')
         sys.exit(1)
 
 except ImportError:
     print('You need to install the python bindings for ' \
-           'gobject, gtk and pango to run Terminator.')
+           'gobject, gtk and pango to run Promptline.')
     sys.exit(1)
 
 import promptlinelib.optionparse
@@ -60,6 +60,13 @@ if __name__ == '__main__':
   
     GLib.set_prgname(APP_NAME)
     import_terminator_config()
+
+    # Running from a source checkout: let GTK find our icons, which are
+    # otherwise only available once installed
+    source_icons = os.path.join(os.path.dirname(os.path.realpath(__file__)),
+                                'data', 'icons')
+    if os.path.isdir(source_icons):
+        Gtk.IconTheme.get_default().prepend_search_path(source_icons)
 
     OPTIONS,dbus_options = promptlinelib.optionparse.parse_options()
     if OPTIONS.configjson:

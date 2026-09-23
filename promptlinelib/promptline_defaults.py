@@ -1,6 +1,6 @@
 # Terminator by Chris Jones <cmsj@tenshu.net>
 # GPL v2 only
-"""promptline_defaults.py - defaults for Promptline's [global_config] keys
+"""promptline_defaults.py - Promptline's configuration defaults
 
 Kept out of config.py's DEFAULTS literal, where upstream Terminator adds its
 own options, so that merging upstream releases doesn't conflict. This module
@@ -23,4 +23,12 @@ GLOBAL_DEFAULTS = {
     'promptline_autocomplete_reasoning': 'xhigh',
     'promptline_agent_model': 'gpt-6-luna',
     'promptline_agent_reasoning': 'xhigh',
+}
+
+# Changes to Terminator's own profile defaults
+PROFILE_DEFAULTS = {
+    # The focused terminal's titlebar: dark grey instead of Terminator's
+    # red. Blue stays reserved for terminals receiving broadcast input
+    # (title_receive_bg_color), so the two remain easy to tell apart.
+    'title_transmit_bg_color': '#2e3436',
 }
