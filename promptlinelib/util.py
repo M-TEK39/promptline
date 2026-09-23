@@ -226,16 +226,19 @@ def import_terminator_config():
     copy them (never move) into Promptline's config directory"""
     ours = get_config_dir()
     theirs = get_config_dir('terminator')
-    if os.path.exists(ours) or not os.path.isdir(theirs):
+    # Decide on the config file, not the directory: other things (such as
+    # the Preferences window's config_cur snapshot) can create the directory
+    if os.path.exists(os.path.join(ours, 'config')) or \
+            not os.path.isfile(os.path.join(theirs, 'config')):
         return
     try:
-        os.makedirs(ours)
-        for name in ('config', 'plugins'):
-            source = os.path.join(theirs, name)
-            if os.path.isdir(source):
-                shutil.copytree(source, os.path.join(ours, name))
-            elif os.path.isfile(source):
-                shutil.copy2(source, os.path.join(ours, name))
+        os.makedirs(ours, exist_ok=True)
+        shutil.copy2(os.path.join(theirs, 'config'),
+                     os.path.join(ours, 'config'))
+        plugins = os.path.join(theirs, 'plugins')
+        if os.path.isdir(plugins) and \
+                not os.path.exists(os.path.join(ours, 'plugins')):
+            shutil.copytree(plugins, os.path.join(ours, 'plugins'))
         dbg('Imported Terminator settings from %s' % theirs)
     except OSError as ex:
         err('Unable to import Terminator settings from %s: %s' % (theirs, ex))

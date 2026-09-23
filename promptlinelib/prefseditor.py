@@ -17,6 +17,7 @@ from .translation import _
 from .terminator import Terminator
 from .plugin import PluginRegistry
 from .version import APP_NAME
+from .promptline import prefs as promptline_prefs
 
 from .plugin import KeyBindUtil
 
@@ -241,6 +242,7 @@ class PrefsEditor:
 
         guiget = self.builder.get_object
         nb = guiget('notebook1')
+        self.promptline_page = promptline_prefs.add_page(nb, self.config)
         nb.set_current_page(cur_page)
 
         self.config.base.save_config_with_suffix('_cur')
