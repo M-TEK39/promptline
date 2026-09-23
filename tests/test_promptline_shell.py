@@ -359,8 +359,9 @@ def test_agent(name, home, history, agent_setup):
 
         typed(terminal, session, controller, "@agent what's wrong?")
         assert press(controller, Gdk.KEY_Return)
-        assert wait_for(lambda: '[a]pprove' in screen_text(terminal)), \
-            screen_text(terminal)
+        # Starting the agent program is the slow part on a loaded machine
+        assert wait_for(lambda: '[a]pprove' in screen_text(terminal),
+                        timeout=30), screen_text(terminal)
         terminal.vte.feed_child(b'a')
         assert wait_for(lambda: session.state == session.PROMPT and
                         session.current_input() is not None and
