@@ -33,6 +33,9 @@ from promptlinelib.layoutlauncher import LayoutLauncher
 from . import regex
 from . import promptline
 from .promptline import shellint
+# Registers Promptline's termprops, which VTE only accepts before the first
+# terminal exists
+from .promptline import marks as _promptline_marks  # noqa: F401
 
 # pylint: disable-msg=R0904
 class Terminal(Gtk.VBox):

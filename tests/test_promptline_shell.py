@@ -392,3 +392,24 @@ def test_agent(name, home, history, agent_setup):
     finally:
         server.httpd.RequestHandlerClass.do_POST = original
 
+
+def test_termprops_registered_before_first_terminal():
+    """VTE refuses new termprops once a terminal exists, so they must be
+    registered when terminal.py is imported. Run in a fresh process: this
+    test module has already imported marks itself."""
+    import subprocess
+    import sys
+    code = ('import gi\n'
+            'gi.require_version("Gtk", "3.0")\n'
+            'gi.require_version("Gdk", "3.0")\n'
+            'import promptlinelib.terminal\n'
+            'from gi.repository import Gtk, Vte\n'
+            'window = Gtk.Window()\n'
+            'window.add(Vte.Terminal())\n'
+            'window.show_all()\n'
+            'from promptlinelib.promptline import available\n'
+            'print(available(), Vte.query_termprop("vte.ext.promptline.exec")[0])\n')
+    result = subprocess.run([sys.executable, '-c', code], capture_output=True,
+                            text=True, timeout=60)
+    assert result.stdout.split() == ['True', 'True'], result.stderr
+    assert 'CRITICAL' not in result.stderr
