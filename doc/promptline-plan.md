@@ -186,7 +186,10 @@ Each phase ends with passing `xvfb-run -a pytest` and a manual run of
   command, it predicts the next command (`promptline_predict_next`). The
   prediction outranks history. Typing along it doesn't trigger another
   request, and results are cached per (input, cwd, last command). A 401/403/404
-  disables prediction for the session with one error.
+  disables prediction for the session with one error. Default model
+  `gpt-6-luna` at `xhigh` reasoning (user's choice, 2026-09-23); the token
+  limit and timeout grow with the reasoning effort, since reasoning tokens
+  count against `max_completion_tokens`.
 - **Coexisting with zsh-autosuggestions / fish:** Promptline only draws when
   nothing else is drawn after the cursor, so the shell plugin wins while it
   has a history match. To let prediction lead, skip the plugin when

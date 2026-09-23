@@ -134,8 +134,8 @@ DEFAULTS = {
             'promptline_base_url'   : 'https://api.openai.com/v1',
             'promptline_api_key_env': 'OPENAI_API_KEY',
             'promptline_api_key_file': '',
-            'promptline_autocomplete_model': 'gpt-5-mini',
-            'promptline_autocomplete_reasoning': 'minimal',
+            'promptline_autocomplete_model': 'gpt-6-luna',
+            'promptline_autocomplete_reasoning': 'xhigh',
         },
         'keybindings': {
             'zoom'             : '',

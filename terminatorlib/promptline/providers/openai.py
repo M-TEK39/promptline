@@ -10,6 +10,10 @@ works without a key.
 True
 >>> OpenAIProvider.needs_key('http://localhost:11434/v1')
 False
+>>> OpenAIProvider('http://x', None, 'm', 'xhigh').budget(256, 15)
+(16640, 120)
+>>> OpenAIProvider('http://x', None, 'm', '').budget(256, 15)
+(256, 15)
 """
 
 import json
@@ -18,6 +22,16 @@ import urllib.parse
 import urllib.request
 
 from . import ProviderError
+
+# Reasoning tokens count against max_completion_tokens, so each effort level
+# needs room to think on top of the visible reply, and time to do it in
+REASONING_BUDGET = {
+    'minimal': (512, 30),
+    'low': (2048, 30),
+    'medium': (4096, 60),
+    'high': (8192, 90),
+    'xhigh': (16384, 120),
+}
 
 
 class OpenAIProvider(object):
@@ -33,8 +47,16 @@ class OpenAIProvider(object):
         host = urllib.parse.urlparse(base_url).hostname or ''
         return host not in ('localhost', '127.0.0.1', '::1')
 
+    def budget(self, max_tokens, timeout):
+        """(token limit, timeout) allowing for the reasoning effort"""
+        extra_tokens, min_timeout = REASONING_BUDGET.get(
+            self.reasoning_effort, (0, 0))
+        return max_tokens + extra_tokens, max(timeout, min_timeout)
+
     def complete(self, messages, max_tokens=256, timeout=15):
-        """Return the reply text for messages"""
+        """Return the reply text for messages. max_tokens is the size of the
+        visible reply; room for reasoning is added on top."""
+        max_tokens, timeout = self.budget(max_tokens, timeout)
         body = {'model': self.model, 'messages': messages,
                 'max_completion_tokens': max_tokens}
         if self.reasoning_effort:
