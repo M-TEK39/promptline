@@ -83,8 +83,8 @@ sudo apt install python3-gi python3-gi-cairo python3-psutil python3-configobj \
 ## Running
 
 ```sh
-git clone https://github.com/M-TEK39/Promptline.git
-cd Promptline
+git clone https://github.com/M-TEK39/promptline.git
+cd promptline
 python3 promptline
 ```
 
@@ -153,9 +153,17 @@ All of Promptline's own code is in `promptlinelib/promptline/`, and the rest
 of the tree stays as close to Terminator as possible. Terminator's original
 README is in [`README.terminator.md`](README.terminator.md).
 
-Terminator was started by Chris Jones in 2007, maintained by Stephen Boddy
-and now by Matt Rose, with contributions from many others listed in
+### Credits
+
+Promptline exists because of Terminator. Terminator was started by Chris
+Jones in 2007, maintained by Stephen Boddy from 2014 to 2020 and since then
+by Matt Rose, with contributions from many others listed in
 [AUTHORS](AUTHORS). Thank you.
+
+The code Promptline inherits remains theirs: its copyright notices and
+license are kept as they are, and the full Terminator history, with its
+authors, is part of this repository's history. Promptline is based on
+Terminator 2.1.6 (upstream commit `9f2d0b6c`).
 
 ## Development
 

@@ -7,11 +7,17 @@ assignees: ''
 
 ---
 
-Before opening an issue, please try starting terminator with an empty config
-file, by issuing `terminator -u -g /dev/null` and see if it starts normally.
+Before opening an issue, please try starting Promptline with an empty config
+file, by issuing `promptline -u -g /dev/null` and see if it starts normally.
 
 If it does, and you still want to open the bug, then please attach the
-config file, usually found at `$HOME/.config/terminator/config` to the issue
+config file, usually found at `$HOME/.config/promptline/config`, to the issue.
+It never contains your API key, but check before posting anything you paste
+from your terminal.
+
+If the problem has nothing to do with Promptline's features (suggestions,
+prediction, @agent) and also happens in Terminator, please report it to
+Terminator: https://github.com/gnome-terminator/terminator/issues
 
 Fill out as many of these fields as you can
 

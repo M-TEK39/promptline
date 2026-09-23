@@ -19,8 +19,8 @@ support (0.78 or newer). On an older VTE Promptline runs as plain Terminator.
 From a checkout
 ---------------
 
-    git clone https://github.com/M-TEK39/Promptline.git
-    cd Promptline
+    git clone https://github.com/M-TEK39/promptline.git
+    cd promptline
     python3 promptline
 
 Installing

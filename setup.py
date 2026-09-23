@@ -190,7 +190,7 @@ setup(name=APP_NAME,
                   'on-request agent (based on Terminator)',
       author='Chris Jones',
       author_email='cmsj@tenshu.net',
-      url='https://github.com/M-TEK39/Promptline',
+      url='https://github.com/M-TEK39/promptline',
       license='GNU GPL v2',
       scripts=['promptline', 'promptline-remote', 'promptline-agent'],
       data_files=[
