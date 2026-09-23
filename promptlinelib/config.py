@@ -76,6 +76,7 @@ from copy import copy
 from configobj import ConfigObj, flatten_errors
 from validate import Validator
 from .borg import Borg
+from . import promptline_defaults
 from .util import dbg, err, DEBUG, get_system_config_dir, get_config_dir, dict_diff, update_config_to_cell_height
 
 from gi.repository import Gio
@@ -122,22 +123,6 @@ DEFAULTS = {
 
             'new_tab_after_current_tab': False,
             'window_decoration_style': 'auto',
-
-            'promptline_enabled'    : True,
-            'promptline_shell_integration': True,
-            'promptline_autocomplete': True,
-            # Model-based command prediction sends terminal context to the
-            # provider, so it is opt-in
-            'promptline_llm_autocomplete': False,
-            'promptline_predict_next': True,
-            'promptline_provider'   : 'openai',
-            'promptline_base_url'   : 'https://api.openai.com/v1',
-            'promptline_api_key_env': 'OPENAI_API_KEY',
-            'promptline_api_key_file': '',
-            'promptline_autocomplete_model': 'gpt-6-luna',
-            'promptline_autocomplete_reasoning': 'xhigh',
-            'promptline_agent_model': 'gpt-6-luna',
-            'promptline_agent_reasoning': 'xhigh',
         },
         'keybindings': {
             'zoom'             : '',
@@ -310,6 +295,7 @@ DEFAULTS = {
         'plugins': {
         },
 }
+DEFAULTS['global_config'].update(promptline_defaults.GLOBAL_DEFAULTS)
 
 class Config(object):
     """Class to provide a slightly richer config API above ConfigBase"""
