@@ -44,9 +44,12 @@ InputLine = collections.namedtuple('InputLine', ['text', 'at_end'])
 
 
 class CommandRecord(object):
-    """One command the user ran"""
+    """One command the user ran. A command typed with a leading space is
+    private, following the shells' ignorespace convention: Promptline won't
+    learn it or share it."""
     def __init__(self, command, cwd):
-        self.command = command
+        self.private = command.startswith(' ')
+        self.command = command.strip()
         self.cwd = cwd
         self.exit_status = None
         self.output = None
@@ -55,7 +58,7 @@ class CommandRecord(object):
 
     def as_dict(self):
         """Plain data for serialising"""
-        return {'command': self.command, 'cwd': self.cwd,
+        return {'private': self.private, 'command': self.command, 'cwd': self.cwd,
                 'exit_status': self.exit_status, 'output': self.output,
                 'started': self.started, 'finished': self.finished}
 
@@ -107,11 +110,14 @@ class ShellSession(object):
                 row, col = self.anchor
                 command = self.screen.text(row, col, end_row,
                                            self.screen.columns())
-                command = self._strip_right_prompt(command).strip()
+                command = self._strip_right_prompt(command).rstrip()
             self.output_start = end_row + 1
         else:
             self.output_start = None
-        self.pending = CommandRecord(command, cwd) if command else None
+        if command and command.strip():
+            self.pending = CommandRecord(command, cwd)
+        else:
+            self.pending = None
         self.state = self.RUNNING
 
     def on_done(self, exit_status):

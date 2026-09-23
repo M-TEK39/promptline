@@ -92,6 +92,7 @@ class Terminal(Gtk.VBox):
     terminator = None
     vte = None
     terminalbox = None
+    vtebox = None
     promptline = None
     scrollbar = None
     titlebar = None
@@ -312,7 +313,7 @@ class Terminal(Gtk.VBox):
             self._wait_for_shell_exit()
 
         if self.vte:
-            self.terminalbox.remove(self.vte)
+            self.terminalbox.remove(self.vtebox)
             del(self.vte)
 
     def _wait_for_shell_exit(self, timeout=0.5, poll_interval=0.02):
@@ -343,7 +344,10 @@ class Terminal(Gtk.VBox):
         self.scrollbar = Gtk.Scrollbar.new(Gtk.Orientation.VERTICAL, adjustment=self.vte.get_vadjustment())
         self.scrollbar.set_no_show_all(True)
 
-        terminalbox.pack_start(self.vte, True, True, 0)
+        # Promptline draws suggestions over the VTE, so it may wrap it
+        self.vtebox = self.promptline.wrap(self.vte) if self.promptline \
+            else self.vte
+        terminalbox.pack_start(self.vtebox, True, True, 0)
         terminalbox.pack_start(self.scrollbar, False, True, 0)
         terminalbox.show_all()
 
@@ -929,7 +933,7 @@ class Terminal(Gtk.VBox):
             if self.config['scrollbar_position'] == 'left':
                 self.terminalbox.reorder_child(self.scrollbar, 0)
             elif self.config['scrollbar_position'] == 'right':
-                self.terminalbox.reorder_child(self.vte, 0)
+                self.terminalbox.reorder_child(self.vtebox, 0)
 
         toplevel = self.get_toplevel()
         if isinstance(toplevel, Gtk.Window) and toplevel.has_toplevel_focus():
@@ -1095,6 +1099,9 @@ class Terminal(Gtk.VBox):
             else:
                 getattr(self, "key_" + mapping)()
                 return True
+
+        if self.promptline and self.promptline.on_keypress(event):
+            return True
 
         # FIXME: This is all clearly wrong. We should be doing this better
         #         maybe we can emit the key event and let Terminator() care?

@@ -11,11 +11,14 @@ import time
 import pytest
 import gi
 gi.require_version('Gtk', '3.0')
+gi.require_version('Gdk', '3.0')
 gi.require_version('Vte', '2.91')
-from gi.repository import GLib, Gtk, Vte
+from gi.repository import Gdk, GLib, Gtk, Vte
 
+from terminatorlib.promptline import controller as controller_module
 from terminatorlib.promptline import marks, shellint
 from terminatorlib.promptline.controller import Controller
+from terminatorlib.promptline.suggest.history import HistoryStore
 
 pytestmark = pytest.mark.skipif(not marks.INSTALLED,
                                 reason='VTE too old for termprops')
@@ -25,8 +28,11 @@ class FakeTerminal(object):
     """Just enough of terminatorlib.terminal.Terminal for a Controller"""
     def __init__(self):
         self.vte = Vte.Terminal()
+        self.fgcolor_active = Gdk.RGBA(1, 1, 1, 1)
         self.window = Gtk.Window()
-        self.window.add(self.vte)
+
+    def attach(self, controller):
+        self.window.add(controller.wrap(self.vte))
         self.window.show_all()
 
     def get_cwd(self):
@@ -46,9 +52,10 @@ def wait_for(predicate, timeout=10):
     return True
 
 
-def start_shell(shell, home, environ):
+def start_shell(shell, home, environ, with_controller=False):
     terminal = FakeTerminal()
     controller = Controller(terminal)
+    terminal.attach(controller)
     argv, envv = shellint.inject(shell, [shell], ['HOME=%s' % home,
                                                   'TERM=xterm-256color'],
                                  environ=environ)
@@ -58,6 +65,8 @@ def start_shell(shell, home, environ):
     session = controller.session
     assert wait_for(lambda: session.state == session.PROMPT), \
         'shell never reported a prompt'
+    if with_controller:
+        return terminal, session, controller
     return terminal, session
 
 
@@ -68,6 +77,16 @@ def run(terminal, session, command):
                     session.state == session.PROMPT), \
         'no record for %r' % command
     return session.log[-1]
+
+
+@pytest.fixture(autouse=True)
+def history(monkeypatch):
+    """Keep tests away from the user's real history"""
+    store = HistoryStore(path=None)
+    monkeypatch.setattr(controller_module, 'shared_store', lambda: store)
+    monkeypatch.setattr(controller_module.promptline, 'enabled',
+                        lambda feature=None: True)
+    return store
 
 
 @pytest.fixture
@@ -116,3 +135,48 @@ def test_current_input(name, home):
     # Cursor moved left: input is known but we're no longer at its end
     terminal.vte.feed_child(b'\x1b[D')
     assert wait_for(lambda: not session.current_input().at_end)
+
+
+def press(controller, keyval, state=0):
+    event = Gdk.Event.new(Gdk.EventType.KEY_PRESS)
+    event.keyval = keyval
+    event.state = state
+    return controller.on_keypress(event)
+
+
+def typed(terminal, session, controller, text):
+    """Type text and wait until the suggestion has been worked out for it"""
+    terminal.vte.feed_child(text.encode())
+    assert wait_for(lambda: session.current_input() is not None and
+                    session.current_input().text.endswith(text) and
+                    controller.refresh_id is None)
+
+
+@pytest.mark.parametrize('name', SHELLS)
+def test_autocomplete(name, home, history):
+    environ = {'ZDOTDIR': str(home / 'zdot')}
+    terminal, session, controller = start_shell(
+        shutil.which(name), str(home), environ, with_controller=True)
+
+    run(terminal, session, 'echo hello big world')
+    run(terminal, session, ' echo private')
+    assert history.best('echo h') == 'echo hello big world'
+    assert history.best('echo p') is None
+
+    typed(terminal, session, controller, 'echo h')
+    assert controller.suggestion == ('echo h', 'ello big world')
+    assert controller.ghost.text == 'ello big world'
+
+    # Alt+Right takes one word, Right takes the rest
+    assert press(controller, Gdk.KEY_Right, Gdk.ModifierType.MOD1_MASK)
+    assert wait_for(lambda: session.current_input().text == 'echo hello'
+                    and controller.suggestion == ('echo hello', ' big world'))
+    assert press(controller, Gdk.KEY_Right)
+    assert wait_for(lambda: session.current_input().text ==
+                    'echo hello big world' and controller.suggestion is None)
+    assert not press(controller, Gdk.KEY_Right)
+    run(terminal, session, '')
+
+    # Nothing in history: fall back to completing the path
+    typed(terminal, session, controller, 'ls su')
+    assert controller.suggestion == ('ls su', 'b\\ dir/')
