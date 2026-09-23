@@ -173,3 +173,21 @@ long output.
 
 Each phase ends with passing `xvfb-run -a pytest` and a manual run of
 `python3 terminator -u -g /tmp/pl-cfg`.
+
+## 7. Progress notes
+
+- **Phases 0–2 done** (2026-09-23). Word-accept uses Ctrl+Right, since
+  Alt+Right is Terminator's `go_right`.
+- **Phase 3 done: command prediction.** With `promptline_llm_autocomplete`
+  on, a pause in typing (350 ms) sends the model the shell/OS, cwd, a short
+  directory listing, the git branch, the last 8 non-private commands with
+  exit statuses, the tail of the last output (secrets redacted) and the typed
+  prefix. The reply must extend what's typed. On an empty prompt after a
+  command, it predicts the next command (`promptline_predict_next`). The
+  prediction outranks history. Typing along it doesn't trigger another
+  request, and results are cached per (input, cwd, last command). A 401/403/404
+  disables prediction for the session with one error.
+- **Coexisting with zsh-autosuggestions / fish:** Promptline only draws when
+  nothing else is drawn after the cursor, so the shell plugin wins while it
+  has a history match. To let prediction lead, skip the plugin when
+  `$PROMPTLINE` is set; Promptline's own history tier covers the same ground.

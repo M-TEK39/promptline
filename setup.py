@@ -220,6 +220,7 @@ setup(name=APP_NAME,
           'terminatorlib.plugins',
           'terminatorlib.promptline',
           'terminatorlib.promptline.suggest',
+          'terminatorlib.promptline.providers',
       ],
       install_requires=[
           'pycairo',

@@ -4,7 +4,6 @@
 """End-to-end tests for Promptline's shell integration: a real shell in a
 real VTE, reporting marks that a Controller turns into a command log."""
 
-import os
 import shutil
 import time
 
@@ -86,6 +85,9 @@ def history(monkeypatch):
     monkeypatch.setattr(controller_module, 'shared_store', lambda: store)
     monkeypatch.setattr(controller_module.promptline, 'enabled',
                         lambda feature=None: True)
+    # Never reach a real provider, even if the developer has a key set
+    monkeypatch.setattr(controller_module, 'make_provider',
+                        lambda purpose: None)
     return store
 
 
@@ -167,8 +169,8 @@ def test_autocomplete(name, home, history):
     assert controller.suggestion == ('echo h', 'ello big world')
     assert controller.ghost.text == 'ello big world'
 
-    # Alt+Right takes one word, Right takes the rest
-    assert press(controller, Gdk.KEY_Right, Gdk.ModifierType.MOD1_MASK)
+    # Ctrl+Right takes one word, Right takes the rest
+    assert press(controller, Gdk.KEY_Right, Gdk.ModifierType.CONTROL_MASK)
     assert wait_for(lambda: session.current_input().text == 'echo hello'
                     and controller.suggestion == ('echo hello', ' big world'))
     assert press(controller, Gdk.KEY_Right)
@@ -180,3 +182,97 @@ def test_autocomplete(name, home, history):
     # Nothing in history: fall back to completing the path
     typed(terminal, session, controller, 'ls su')
     assert controller.suggestion == ('ls su', 'b\\ dir/')
+
+
+class FakeOpenAI(object):
+    """A local stand-in for the Chat Completions endpoint"""
+    def __init__(self):
+        import http.server
+        import json
+        import threading
+        server = self
+        self.requests = []
+        self.reply = lambda body: ''
+        self.status = 200
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers['Content-Length'])
+                body = json.loads(self.rfile.read(length))
+                server.requests.append(body)
+                if server.status != 200:
+                    payload = {'error': {'message': 'bad key'}}
+                else:
+                    payload = {'choices': [{'message': {
+                        'role': 'assistant', 'content': server.reply(body)}}]}
+                data = json.dumps(payload).encode()
+                self.send_response(server.status)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *args):
+                pass
+
+        self.httpd = http.server.HTTPServer(('127.0.0.1', 0), Handler)
+        self.url = 'http://127.0.0.1:%d/v1' % self.httpd.server_port
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def prompt(self, index=-1):
+        return self.requests[index]['messages'][-1]['content']
+
+
+@pytest.fixture
+def fake_openai(monkeypatch):
+    from terminatorlib.promptline.providers.openai import OpenAIProvider
+    server = FakeOpenAI()
+    monkeypatch.setattr(controller_module, 'make_provider',
+                        lambda purpose: OpenAIProvider(server.url, None,
+                                                       'test-model'))
+    yield server
+    server.httpd.shutdown()
+
+
+def test_prediction(home, history, fake_openai):
+    terminal, session, controller = start_shell(
+        shutil.which('bash'), str(home), {}, with_controller=True)
+    run(terminal, session, 'git push 2>/dev/null || echo "no upstream"; false')
+    run(terminal, session, ' echo my-secret-thing')
+
+    # Typing: the model completes what was started, using the context
+    fake_openai.reply = lambda body: 'git push --set-upstream origin main'
+    typed(terminal, session, controller, 'git pu')
+    assert wait_for(lambda: controller.suggestion ==
+                    ('git pu', 'sh --set-upstream origin main'))
+    prompt = fake_openai.prompt()
+    assert 'Typed so far: git pu' in prompt
+    assert '[exit 1]' in prompt and 'no upstream' in prompt
+    assert 'my-secret-thing' not in prompt
+    assert fake_openai.requests[-1]['model'] == 'test-model'
+
+    # Typing along the prediction keeps it without asking again
+    asked = len(fake_openai.requests)
+    typed(terminal, session, controller, 'sh')
+    assert controller.suggestion == ('git push', ' --set-upstream origin main')
+    time.sleep(0.5)
+    assert len(fake_openai.requests) == asked
+
+    # After a command finishes, the empty prompt gets a next-command guess
+    terminal.vte.feed_child(b'\x15')    # clear the line
+    fake_openai.reply = lambda body: '$ ls -la'
+    run(terminal, session, 'echo done')
+    assert wait_for(lambda: controller.suggestion == ('', 'ls -la'))
+    assert 'Nothing typed yet' in fake_openai.prompt()
+
+
+def test_prediction_auth_failure(home, history, fake_openai):
+    terminal, session, controller = start_shell(
+        shutil.which('bash'), str(home), {}, with_controller=True)
+    fake_openai.status = 401
+    typed(terminal, session, controller, 'git st')
+    assert wait_for(lambda: controller.predictor.disabled)
+    asked = len(fake_openai.requests)
+    typed(terminal, session, controller, 'a')
+    time.sleep(0.5)
+    assert len(fake_openai.requests) == asked

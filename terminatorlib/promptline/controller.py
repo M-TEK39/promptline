@@ -17,12 +17,17 @@ from ..util import dbg
 from .. import promptline
 from . import marks
 from .ghost import GhostText
+from .providers import make_provider
 from .session import ShellSession
 from .suggest import Suggester
 from .suggest.history import shared_store
+from .suggest.llm import Predictor, build_messages
 
 # Exit status the shells use for "command not found": not worth learning
 NOT_FOUND = 127
+# Wait for a pause in typing before asking the model
+PREDICT_DELAY_MS = 350
+PREDICT_MIN_TYPED = 2
 
 
 class VteScreen(object):
@@ -55,6 +60,10 @@ class Controller(object):
         self.suggestion = None      # (input it extends, suffix)
         self.refresh_id = None
         self.last_learned = None
+        self.predictor = Predictor(lambda: make_provider('autocomplete'))
+        self.prediction = None      # full command line the model predicted
+        self.predict_id = None
+        self.predicted_for = None   # input the last request was made for
         self.cnxids = Signalman()
         self.cnxids.new(self.vte, 'termprops-changed',
                         self.on_termprops_changed)
@@ -78,9 +87,10 @@ class Controller(object):
     def destroy(self):
         """Disconnect from the VTE"""
         self.cnxids.remove_all()
-        if self.refresh_id is not None:
-            GLib.source_remove(self.refresh_id)
-            self.refresh_id = None
+        for source in (self.refresh_id, self.predict_id):
+            if source is not None:
+                GLib.source_remove(source)
+        self.refresh_id = self.predict_id = None
 
     def on_termprops_changed(self, vte, props, _count):
         """Collect our marks from this batch and apply them in order"""
@@ -99,6 +109,7 @@ class Controller(object):
         dbg('promptline mark %s=%r' % (name[len(marks.PREFIX):], value))
         session = self.session
         if name == marks.EXEC:
+            self.reset_prediction()
             session.on_exec(marks.decode_command(value),
                             self.terminal.get_cwd())
         elif name == marks.DONE:
@@ -106,6 +117,7 @@ class Controller(object):
         elif name == marks.PROMPT:
             session.on_prompt(marks.parse_int(value, 1))
         elif name == marks.INPUT:
+            self.reset_prediction()
             session.on_input()
             if session.log:
                 self.learn(session.log[-1])
@@ -144,11 +156,17 @@ class Controller(object):
         suffix = None
         line = self.session.current_input()
         if (line is not None and line.at_end and
-                promptline.enabled('autocomplete') and
                 not self.vte.get_has_selection() and
                 not self.scrolled_back()):
-            suffix = self.suggester.suggest(line.text,
-                                            self.terminal.get_cwd())
+            cwd = self.terminal.get_cwd()
+            prediction = self.prediction
+            if prediction and prediction.startswith(line.text) and \
+                    len(prediction) > len(line.text):
+                suffix = prediction[len(line.text):]
+            elif promptline.enabled('autocomplete'):
+                suffix = self.suggester.suggest(line.text, cwd)
+            if promptline.enabled('llm_autocomplete'):
+                self.schedule_prediction(line.text, cwd)
         if suffix:
             suffix = suffix.split('\n')[0]
             row, column = self.session.screen.cursor()
@@ -163,9 +181,58 @@ class Controller(object):
         self.ghost.clear()
         return False
 
+    def reset_prediction(self):
+        """Forget the prediction: the context it was made in has changed"""
+        self.prediction = self.predicted_for = None
+        if self.predict_id is not None:
+            GLib.source_remove(self.predict_id)
+            self.predict_id = None
+
+    def schedule_prediction(self, typed, cwd):
+        """Ask the model about typed once the user pauses, unless there's
+        nothing worth asking"""
+        if typed == self.predicted_for:
+            return
+        self.predicted_for = typed
+        if self.predict_id is not None:
+            GLib.source_remove(self.predict_id)
+            self.predict_id = None
+        prediction = self.prediction
+        if prediction and prediction.startswith(typed) and \
+                len(prediction) > len(typed):
+            return      # still typing along the last prediction
+        if typed.strip():
+            if len(typed.strip()) < PREDICT_MIN_TYPED:
+                return
+        elif not (self.session.log and promptline.enabled('predict_next')):
+            return
+        last = self.session.log[-1] if self.session.log else None
+        key = (typed, cwd, id(last))
+        cached = self.predictor.cached(key)
+        if cached is not False:
+            self.prediction = cached
+            return
+        self.predict_id = GLib.timeout_add(PREDICT_DELAY_MS, self.predict,
+                                           key, typed, cwd)
+
+    def predict(self, key, typed, cwd):
+        self.predict_id = None
+        messages = build_messages(typed, cwd, list(self.session.log))
+        self.predictor.request(key, typed, messages, self.on_prediction)
+        return False
+
+    def on_prediction(self, _key, typed, prediction):
+        line = self.session.current_input()
+        if prediction and line is not None and \
+                prediction.startswith(line.text) and \
+                line.text.startswith(typed):
+            self.prediction = prediction
+            self.schedule_refresh()
+
     def on_keypress(self, event):
-        """Accept the suggestion on Right/End (all of it) or Alt+Right (the
-        next word). Returns True if the key was consumed."""
+        """Accept the suggestion on Right/End (all of it) or Ctrl+Right (the
+        next word; Alt+Right is Terminator's go_right). Returns True if the
+        key was consumed."""
         if self.suggestion is None:
             return False
         modifiers = event.state & Gtk.accelerator_get_default_mod_mask()
@@ -173,7 +240,7 @@ class Controller(object):
         end = event.keyval in (Gdk.KEY_End, Gdk.KEY_KP_End)
         if (right or end) and modifiers == 0:
             whole = True
-        elif right and modifiers == Gdk.ModifierType.MOD1_MASK:
+        elif right and modifiers == Gdk.ModifierType.CONTROL_MASK:
             whole = False
         else:
             return False
