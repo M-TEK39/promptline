@@ -79,6 +79,7 @@ class ShellSession(object):
         self.right_prompt = ''      # text right of the anchor (zsh RPROMPT)
         self.input_end_row = None   # lowest row the input reached
         self.pending = None         # record waiting for its output
+        self.after = None           # input characters after the cursor
         self.output_start = None
 
     def on_prompt(self, rows):
@@ -94,7 +95,12 @@ class ShellSession(object):
         self.right_prompt = self.screen.text(row, col, row,
                                              self.screen.columns()).strip()
         self.input_end_row = row
+        self.after = None
         self.state = self.PROMPT
+
+    def on_after(self, count):
+        """The shell says count characters of the input follow the cursor"""
+        self.after = count
 
     def on_exec(self, command, cwd):
         """A command is about to run. command is None if the shell didn't
@@ -163,6 +169,40 @@ class ShellSession(object):
         after = self.screen.text(row, col, row, self.screen.columns()).strip()
         at_end = after == '' or (row == arow and after == self.right_prompt)
         return InputLine(text, at_end)
+
+    def whole_input(self):
+        r"""The whole line being edited, wherever the cursor is in it (Enter
+        runs all of it), or None. The part after the cursor is what the
+        shell says is there (zsh) or the rest of the line on screen.
+
+        >>> screen = FakeScreen()
+        >>> session = ShellSession(screen)
+        >>> screen.write('$ '); session.on_prompt(1); session.on_input()
+        >>> screen.write('@agent where am i')
+        >>> screen.cursor = lambda: (0, 2)    # history search left it here
+        >>> session.current_input().text, session.whole_input()
+        ('', '@agent where am i')
+        >>> session.on_after(15)    # ' i' is a suggestion drawn after the input
+        >>> session.whole_input()
+        '@agent where am'
+        """
+        line = self.current_input()
+        if line is None:
+            return None
+        if line.at_end:
+            return line.text
+        row, col = self.screen.cursor()
+        columns = max(1, self.screen.columns())
+        rows = (self.after or 0) // columns + 1 if self.after is not None \
+            else 50
+        rest = self.screen.text(row, col, row + rows, columns)
+        # Soft-wrapped rows come back joined; a newline ends the input
+        rest = rest.split('\n')[0]
+        if self.after is not None:
+            rest = rest[:self.after]
+        else:
+            rest = self._strip_right_prompt(rest).rstrip()
+        return line.text + rest
 
     def _strip_right_prompt(self, text):
         if self.right_prompt and text.rstrip().endswith(self.right_prompt):

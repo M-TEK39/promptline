@@ -39,8 +39,12 @@ DONE = PREFIX + 'done'
 PROMPT = PREFIX + 'prompt'
 # The prompt is drawn; the cursor is where the user's input starts.
 INPUT = PREFIX + 'input'
+# How many characters of the line being edited follow the cursor (zsh, on
+# every redraw). Text on screen past those isn't input: plugins such as
+# zsh-autosuggestions draw their suggestion there.
+AFTER = PREFIX + 'after'
 
-ORDER = (EXEC, DONE, PROMPT, INPUT)
+ORDER = (EXEC, DONE, PROMPT, INPUT, AFTER)
 
 
 def _install():

@@ -495,3 +495,34 @@ def test_agent_command_ctrl_c(home, history, agent_setup):
                     session.state == session.PROMPT, timeout=5), \
         screen_text(terminal)
     assert len(agent_setup.requests) == 1
+
+
+@pytest.mark.parametrize('recall', ['ctrl-a'] + (
+    ['zsh-up-arrow'] if shutil.which('zsh') else []))
+@pytest.mark.parametrize('name', SHELLS)
+def test_agent_with_cursor_not_at_end(name, recall, home, history,
+                                      agent_setup):
+    """Enter runs the whole line, wherever the cursor is: zsh's
+    history-beginning-search-backward recalls a line with the cursor left at
+    its start"""
+    if recall == 'zsh-up-arrow' and name != 'zsh':
+        pytest.skip('zsh key binding')
+    (home / '.zsh_history').write_text('@agent where am i\n')
+    (home / '.zshrc').write_text(
+        'HISTFILE=~/.zsh_history; HISTSIZE=100; SAVEHIST=100\n'
+        "bindkey '^[[A' history-beginning-search-backward\n")
+    scripted(agent_setup, [{'content': 'All done.'}])
+    terminal, session, controller = start_shell(
+        shutil.which(name), str(home), {}, with_controller=True)
+    if recall == 'ctrl-a':
+        typed(terminal, session, controller, '@agent where am i')
+        terminal.vte.feed_child(b'\x01')
+    else:
+        terminal.vte.feed_child(b'\x1b[A')
+    assert wait_for(lambda: '@agent where am i' in screen_text(terminal) and
+                    session.current_input() is not None and
+                    not session.current_input().at_end), screen_text(terminal)
+    assert press(controller, Gdk.KEY_Return)
+    assert agent_done(terminal, session), screen_text(terminal)
+    assert agent_setup.requests[0]['messages'][-1]['content'].endswith(
+        'where am i')

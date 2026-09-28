@@ -100,7 +100,7 @@ All Promptline code is in `promptlinelib/promptline/`:
 | --- | --- |
 | `shell/promptline.bash`, `shell/promptline.zsh`, `shell/zdotdir/.zshenv` | Integration loaded after the user's own rc files (bash `--rcfile`, zsh `ZDOTDIR` shim). Emits marks and OSC 7; defines `_promptline_agent` |
 | `shellint.py` | Rewrites argv/env at spawn (`Terminal.spawn_child`); adds `PROMPTLINE*` env vars |
-| `marks.py` | The protocol: termprops `vte.ext.promptline.{exec,done,prompt,input}` set with `OSC 666 ; name=value ST` |
+| `marks.py` | The protocol: termprops `vte.ext.promptline.{exec,done,prompt,input,after}` set with `OSC 666 ; name=value ST` |
 | `controller.py` | One per `Terminal`: VTE signals → session, suggestion refresh, key handling, `@agent` launch |
 | `session.py` | GTK-free state machine: reads the typed line off the screen, logs commands (cwd, exit status, output) |
 | `suggest/` | `history.py` (shell histories + own log, frecency), `paths.py` (unambiguous path completion), `llm.py` (context, redaction, `Predictor`) |
