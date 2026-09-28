@@ -28,6 +28,7 @@ import time
 
 from . import read_request, runtime_dir, write_prefill
 from .. import personal
+from .approval import AskEveryTime, AutoReview, FullPermission, ModelReviewer
 from .loop import Agent
 from .prompts import system_prompt, user_message
 from .tools import run_command
@@ -40,6 +41,7 @@ STORED_TOOL_OUTPUT = 4000
 BOLD = '\033[1m'
 DIM = '\033[2m'
 ACCENT = '\033[36m'
+WARN = '\033[33m'
 RESET = '\033[0m'
 
 
@@ -142,9 +144,24 @@ class TtyUI(object):
     def error(self, text):
         self.write(BOLD + 'promptline-agent: ' + RESET + text + '\n')
 
-    def approve(self, command, reason):
+    def mode_banner(self, mode):
+        if mode == 'auto-review':
+            self.note('Auto-review: commands the reviewer judges safe run '
+                      'without asking.')
+        elif mode == 'full':
+            self.write(WARN + BOLD + 'Full permission mode:' + RESET + WARN +
+                       ' commands run without asking (a few dangerous ones '
+                       'still ask).' + RESET + '\n')
+
+    def auto_approved(self, command, mode, note):
+        self.write('  ' + BOLD + '$ ' + command + RESET + '  ' + DIM +
+                   '(%s)' % (note or 'full permission') + RESET + '\n')
+
+    def approve(self, command, reason, note=None):
         if reason:
             self.write(DIM + reason + RESET + '\n')
+        if note:
+            self.write(WARN + note + RESET + '\n')
         self.write('  ' + BOLD + '$ ' + command + RESET + '\n')
         if not self.tty:
             self.note('Not running it: no terminal to ask for approval.')
@@ -199,6 +216,53 @@ class TtyUI(object):
         if status:
             self.note('exit %d' % status)
         self.write('\n')
+
+
+class AuditLog(object):
+    """Every command the agent runs, and how it was allowed to run:
+    time, mode, approval, exit status, directory, command (tab-separated)"""
+    def __init__(self, cwd, mode, filename=None):
+        self.cwd = cwd
+        self.mode = mode
+        self.filename = filename or os.path.join(
+            os.path.dirname(personal.path('memory')), 'agent-audit.log')
+
+    def __call__(self, command, how, status):
+        line = '\t'.join([time.strftime('%Y-%m-%dT%H:%M:%S%z'), self.mode,
+                          how, 'exit=%s' % status, self.cwd,
+                          ' '.join(command.split('\n'))]) + '\n'
+        try:
+            os.makedirs(os.path.dirname(self.filename), mode=0o700,
+                        exist_ok=True)
+            fd = os.open(self.filename,
+                         os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+            with os.fdopen(fd, 'a', encoding='utf-8') as handle:
+                handle.write(line)
+        except OSError:
+            pass
+
+
+def choose_policy(ui, options, settings, query, cwd, guardrails):
+    """The approval policy for this run, and the mode it implements. Full
+    permission falls back to asking unless the user's guardrails are set."""
+    mode = options.get('mode', 'ask')
+    if mode == 'full':
+        ready, why = personal.guardrails_ready()
+        if not ready:
+            ui.note('Full permission mode is locked: %s (`promptline '
+                    '--guardrails`). Asking before each command instead.'
+                    % why)
+            mode = 'ask'
+    if mode == 'full':
+        return FullPermission(), mode
+    if mode == 'auto-review':
+        review = dict(settings or {}, reasoning=options.get(
+            'review_reasoning', 'medium'))
+        reviewer = make_provider('agent', review)
+        if reviewer is not None:
+            return AutoReview(ModelReviewer(reviewer, query, cwd,
+                                            guardrails)), mode
+    return AskEveryTime(), 'ask'
 
 
 def first_time_tip(ui):
@@ -261,12 +325,19 @@ def main(argv=None):
     if not about and not memory.facts():
         first_time_tip(ui)
 
+    guardrails = personal.guardrail_rules()
+    policy, mode = choose_policy(ui, request.get('agent') or {},
+                                 request.get('settings'), query, cwd,
+                                 guardrails)
+    ui.mode_banner(mode)
+
     store = ConversationStore(request.get('terminal'))
     history = store.load()
-    prompt = system_prompt(shell, personal=about, memory=memory.text(),
-                           guardrails=personal.guardrail_rules())
-    agent = Agent(provider, ui, executor, memory=memory, messages=[
-        {'role': 'system', 'content': prompt}] + history)
+    prompt = system_prompt(shell, mode=mode, personal=about,
+                           memory=memory.text(), guardrails=guardrails)
+    agent = Agent(provider, ui, executor, policy=policy, memory=memory,
+                  audit=AuditLog(cwd, mode), messages=[
+                      {'role': 'system', 'content': prompt}] + history)
     try:
         agent.run(user_message(request))
     except KeyboardInterrupt:

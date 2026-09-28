@@ -432,3 +432,135 @@ def test_termprops_registered_before_first_terminal():
                             text=True, timeout=60)
     assert result.stdout.split() == ['True', 'True'], result.stderr
     assert 'CRITICAL' not in result.stderr
+
+
+def scripted(server, steps, review=None):
+    """Make the fake server play `steps` as the agent's replies, and answer
+    auto-review requests with review(command) -> (verdict, reason)"""
+    import json
+
+    def do_POST(handler):
+        length = int(handler.headers['Content-Length'])
+        body = json.loads(handler.rfile.read(length))
+        system = body['messages'][0]['content']
+        if system.startswith('You review shell commands'):
+            command = body['messages'][-1]['content'].split(
+                'Command: ')[1].split('\n')[0]
+            verdict, reason = review(command)
+            message = {'role': 'assistant', 'content': json.dumps(
+                {'verdict': verdict, 'reason': reason})}
+            server.reviews.append(command)
+        else:
+            server.requests.append(body)
+            message = dict({'role': 'assistant', 'content': None},
+                           **steps[len(server.requests) - 1])
+        data = json.dumps({'choices': [{'message': message}]}).encode()
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'application/json')
+        handler.send_header('Content-Length', str(len(data)))
+        handler.end_headers()
+        handler.wfile.write(data)
+    server.reviews = []
+    server.httpd.RequestHandlerClass.do_POST = do_POST
+
+
+def run_agent(terminal, session, controller, question):
+    typed(terminal, session, controller, '@agent ' + question)
+    assert press(controller, Gdk.KEY_Return)
+
+
+def agent_done(terminal, session):
+    return wait_for(lambda: session.state == session.PROMPT and
+                    'All done.' in screen_text(terminal), timeout=30)
+
+
+def audit_lines(home):
+    log = home / 'data' / 'promptline' / 'agent-audit.log'
+    return [line.split('\t') for line in log.read_text().splitlines()]
+
+
+def test_agent_full_permission(home, history, agent_setup, monkeypatch):
+    monkeypatch.setattr(controller_module, 'Config', lambda: {
+        'promptline_agent_mode': 'full',
+        'promptline_review_reasoning': 'low'})
+    (home / 'config' / 'promptline' / 'guardrails.md').write_text(
+        '- Never touch production\n- No scans outside 10.20.0.0/16\n'
+        '- Ask before deleting anything\n')
+    scripted(agent_setup, [
+        {'tool_calls': [tool_call('run_command', command='echo unasked',
+                                  reason='harmless')]},
+        {'tool_calls': [tool_call('run_command', command='sudo reboot',
+                                  reason='apply changes')]},
+        {'content': 'All done.'},
+    ])
+    terminal, session, controller = start_shell(
+        shutil.which('bash'), str(home), {}, with_controller=True)
+    run_agent(terminal, session, controller, 'do it')
+    # The hard stop still asks, even in full permission mode
+    assert wait_for(lambda: 'Always asks: shuts down' in screen_text(terminal),
+                    timeout=30), screen_text(terminal)
+    terminal.vte.feed_child(b'c')
+    assert agent_done(terminal, session), screen_text(terminal)
+
+    screen = screen_text(terminal)
+    assert 'Full permission mode:' in screen
+    assert 'unasked' in screen
+    system = agent_setup.requests[0]['messages'][0]['content']
+    assert 'full permission mode' in system
+    assert '- Ask before deleting anything' in system
+    declined = agent_setup.requests[2]['messages'][-1]['content']
+    assert declined.startswith('The user declined') and 'shuts down' in declined
+    [(_, mode, how, status, _cwd, command)] = audit_lines(home)
+    assert (mode, how, status, command) == ('full', 'full', 'exit=0',
+                                            'echo unasked')
+
+
+def test_agent_full_permission_locked(home, history, agent_setup,
+                                      monkeypatch):
+    monkeypatch.setattr(controller_module, 'Config', lambda: {
+        'promptline_agent_mode': 'full',
+        'promptline_review_reasoning': 'low'})
+    scripted(agent_setup, [
+        {'tool_calls': [tool_call('run_command', command='echo hi',
+                                  reason='check')]},
+        {'content': 'All done.'},
+    ])
+    terminal, session, controller = start_shell(
+        shutil.which('bash'), str(home), {}, with_controller=True)
+    run_agent(terminal, session, controller, 'hello')
+    assert wait_for(lambda: '[a]pprove' in screen_text(terminal), timeout=30)
+    assert 'Full permission mode is locked' in screen_text(terminal)
+    terminal.vte.feed_child(b'a')
+    assert agent_done(terminal, session)
+    # The agent was told it is in ask mode, not full
+    system = agent_setup.requests[0]['messages'][0]['content']
+    assert 'The user approves each one' in system
+    assert 'full permission mode' not in system
+
+
+def test_agent_auto_review(home, history, agent_setup, monkeypatch):
+    monkeypatch.setattr(controller_module, 'Config', lambda: {
+        'promptline_agent_mode': 'auto-review',
+        'promptline_review_reasoning': 'low'})
+    scripted(agent_setup, [
+        {'tool_calls': [tool_call('run_command', command='echo looked',
+                                  reason='read-only check')]},
+        {'tool_calls': [tool_call('run_command',
+                                  command='echo pretend-restart',
+                                  reason='restart the service')]},
+        {'content': 'All done.'},
+    ], review=lambda command: ('safe', 'only prints text')
+       if 'looked' in command else ('ask', 'restarts a service'))
+    terminal, session, controller = start_shell(
+        shutil.which('bash'), str(home), {}, with_controller=True)
+    run_agent(terminal, session, controller, 'check and restart')
+    assert wait_for(lambda: 'Reviewer: restarts a service' in
+                    screen_text(terminal), timeout=30), screen_text(terminal)
+    terminal.vte.feed_child(b'a')
+    assert agent_done(terminal, session), screen_text(terminal)
+
+    screen = screen_text(terminal)
+    assert '(reviewer: only prints text)' in screen
+    assert agent_setup.reviews == ['echo looked', 'echo pretend-restart']
+    assert [(line[2], line[5]) for line in audit_lines(home)] == [
+        ('auto-review', 'echo looked'), ('approved', 'echo pretend-restart')]

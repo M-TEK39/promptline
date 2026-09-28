@@ -23,6 +23,9 @@ GLOBAL_DEFAULTS = {
     'promptline_autocomplete_reasoning': 'xhigh',
     'promptline_agent_model': 'gpt-6-luna',
     'promptline_agent_reasoning': 'xhigh',
+    # ask | auto-review | full. Full also needs the user's guardrails
+    'promptline_agent_mode': 'ask',
+    'promptline_review_reasoning': 'medium',
 }
 
 # Changes to Terminator's own profile defaults

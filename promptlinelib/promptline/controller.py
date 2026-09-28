@@ -15,6 +15,7 @@ gi.require_version('Gdk', '3.0')
 gi.require_version('Vte', '2.91')
 from gi.repository import GLib, Gdk, Gtk, Vte
 
+from ..config import Config
 from ..signalman import Signalman
 from ..util import dbg
 from .. import promptline
@@ -301,6 +302,10 @@ class Controller(object):
             'records': [record.as_dict() for record in self.session.log
                         if not record.private],
             'settings': provider_settings('agent'),
+            'agent': {
+                'mode': Config()['promptline_agent_mode'],
+                'review_reasoning': Config()['promptline_review_reasoning'],
+            },
         }
         try:
             token = write_request(request, query)

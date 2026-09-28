@@ -6,8 +6,9 @@ The loop is independent of any terminal: it talks to the user through a UI
 object and runs commands through an executor, so it is tested with fakes.
 
 UI methods: thinking(fn) runs fn while showing progress and returns its
-result; say(text); approve(command, reason) -> ('approve'|'cancel',
-command); running(command); finished(status); note(text).
+result; say(text); approve(command, reason, note) -> ('approve'|'cancel',
+command); auto_approved(command, mode, note); running(command);
+finished(status); note(text).
 
 >>> class Provider(object):
 ...     def __init__(self, replies): self.replies = list(replies)
@@ -16,8 +17,10 @@ command); running(command); finished(status); note(text).
 ...     def __init__(self, answer): self.answer, self.log = answer, []
 ...     def thinking(self, fn): return fn()
 ...     def say(self, text): self.log.append(('say', text))
-...     def approve(self, command, reason):
+...     def approve(self, command, reason, note=None):
 ...         self.log.append(('approve?', command, reason)); return self.answer
+...     def auto_approved(self, command, mode, note):
+...         self.log.append(('auto', mode, command))
 ...     def running(self, command): self.log.append(('run', command))
 ...     def finished(self, status): pass
 ...     def note(self, text): self.log.append(('note', text))
@@ -66,6 +69,23 @@ Memory tools, and edits reported back to the model:
 >>> json.loads(agent.messages[4]['content'])['note']
 'The user edited your command and ran this instead: nessuscli scan --target 10.0.0.5'
 
+In full permission mode commands run unasked, except hard stops, and
+every command run is audited:
+
+>>> from .approval import FullPermission
+>>> provider = Provider([call('run_command', command='df -h', reason='disk'),
+...                      call('run_command', command='sudo reboot',
+...                           reason='apply'),
+...                      {'role': 'assistant', 'content': 'Done.'}])
+>>> ui, audit = UI(('cancel', 'sudo reboot')), []
+>>> agent = Agent(provider, ui, executor, policy=FullPermission(),
+...               audit=lambda *entry: audit.append(entry))
+>>> agent.run({'role': 'user', 'content': 'check disk then reboot'})
+>>> ui.log[:3]
+[('auto', 'full', 'df -h'), ('run', 'df -h'), ('approve?', 'sudo reboot', 'apply')]
+>>> audit
+[('df -h', 'full', 0)]
+
 place_on_prompt remembers the command for the user's prompt:
 
 >>> provider = Provider([call('place_on_prompt', command='cd /srv/app'),
@@ -86,12 +106,13 @@ MAX_STEPS = 25
 
 class Agent(object):
     def __init__(self, provider, ui, executor, policy=None, messages=None,
-                 max_steps=MAX_STEPS, memory=None):
+                 max_steps=MAX_STEPS, memory=None, audit=None):
         self.provider = provider
         self.ui = ui
         self.executor = executor
         self.policy = policy or AskEveryTime()
         self.memory = memory
+        self.audit = audit          # audit(command, how, exit status)
         self.messages = list(messages or [])
         self.max_steps = max_steps
         self.prefill = None
@@ -136,19 +157,28 @@ class Agent(object):
 
         if name != 'run_command':
             return 'Error: there is no tool called %r.' % name
-        decision = self.policy.decide(command)
-        if decision == DENY:
+        reason = args.get('reason', '')
+        decision = self.policy.decide(command, reason)
+        if decision.action == DENY:
             return 'This command is not allowed.'
         proposed = command
-        if decision != ALLOW:
-            answer, command = self.ui.approve(command,
-                                              args.get('reason', ''))
+        if decision.action == ALLOW:
+            self.ui.auto_approved(command, self.policy.mode, decision.note)
+            how = self.policy.mode
+        else:
+            answer, command = self.ui.approve(command, reason, decision.note)
             self.policy.remember(command, answer == 'approve')
             if answer != 'approve':
-                return 'The user declined to run this command.'
+                result = 'The user declined to run this command.'
+                if decision.note:
+                    result += ' (It was flagged: %s.)' % decision.note
+                return result
+            how = 'edited' if command != proposed else 'approved'
         self.ui.running(command)
         status, output = self.executor(command)
         self.ui.finished(status)
+        if self.audit is not None:
+            self.audit(command, how, status)
         result = {'exit_status': status, 'output': output}
         if command != proposed:
             # How the user changes a command is worth learning from

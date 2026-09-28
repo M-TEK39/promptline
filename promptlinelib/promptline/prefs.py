@@ -16,6 +16,23 @@ from .providers import resolve_api_key
 
 REASONING = ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh']
 
+MODES = [
+    ('ask', _('Ask before every command')),
+    ('auto-review', _('Auto-review')),
+    ('full', _('Full permission')),
+]
+MODE_NOTES = {
+    'ask': _('Every command waits for Approve / Edit / Cancel.'),
+    'auto-review': _('A reviewer model checks each command. Commands it '
+                     'judges safe run without asking; anything else asks '
+                     'you, with its reason. A review can be wrong: only use '
+                     'this where a mistake is recoverable.'),
+    'full': _('DANGEROUS: commands run without asking. Only a short list of '
+              'catastrophic commands still asks. Requires your guardrails, '
+              'which are added to the agent\'s instructions. Every command '
+              'is logged to ~/.local/share/promptline/agent-audit.log.'),
+}
+
 
 class PromptlinePage(object):
     """Widgets bound to the promptline_* keys in [global_config]"""
@@ -25,6 +42,7 @@ class PromptlinePage(object):
                              margin=18)
         self.row = 0
         self.key_status = None
+        self.reverting_mode = False
 
         self.heading(_('Promptline'))
         self.note(_('With these off, Promptline behaves exactly like '
@@ -56,10 +74,10 @@ class PromptlinePage(object):
         self.file_buttons()
 
         self.heading(_('@agent'))
-        self.note(_('Type "@agent" and a question or task at the prompt. '
-                    'Every command it wants to run asks for your approval.'))
+        self.note(_('Type "@agent" and a question or task at the prompt.'))
         self.entry('agent_model', _('Model'))
         self.reasoning('agent_reasoning', _('Reasoning effort'))
+        self.mode_chooser()
 
         self.heading(_('Provider'))
         self.entry('base_url', _('API base URL'))
@@ -116,6 +134,39 @@ class PromptlinePage(object):
         combo.connect('changed', lambda c: self.set(
             key, c.get_active_text().strip()))
         self.attach(combo, text)
+
+    def mode_chooser(self):
+        combo = Gtk.ComboBoxText()
+        for mode, label in MODES:
+            combo.append(mode, label)
+        current = self.config['promptline_agent_mode']
+        combo.set_active_id(current if current in dict(MODES) else 'ask')
+        self.mode_note = Gtk.Label(xalign=0, wrap=True, max_width_chars=70)
+        self.mode_note.set_text(MODE_NOTES[combo.get_active_id()])
+        combo.connect('changed', self.on_mode_changed)
+        self.attach(combo, _('Permission mode'))
+        self.attach(self.mode_note)
+        self.mode_combo = combo
+
+    def on_mode_changed(self, combo):
+        mode = combo.get_active_id()
+        if self.reverting_mode:
+            return
+        if mode == 'full':
+            ready, why = personal.guardrails_ready()
+            if not ready:
+                previous = self.config['promptline_agent_mode']
+                # Reverting fires 'changed' again; keep the explanation
+                self.reverting_mode = True
+                combo.set_active_id(previous if previous != 'full'
+                                    else 'ask')
+                self.reverting_mode = False
+                self.mode_note.set_text(
+                    _('Full permission is locked: %s. Use the Guardrails... '
+                      'button above, then choose it again.') % why)
+                return
+        self.set('agent_mode', mode)
+        self.mode_note.set_text(MODE_NOTES[mode])
 
     def file_buttons(self):
         box = Gtk.Box(spacing=6)
