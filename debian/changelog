@@ -1,3 +1,17 @@
+promptline (0.1.1) unstable; urgency=medium
+
+  * Fix crashes when a shell exits in a tab, when splitting a pane inside
+    a tab, and when closing a tab with its close button.
+  * The mouse now works in the terminal: selecting, scrolling and the
+    right-click menu (and so Preferences).
+  * @agent commands get a real terminal: installer dialogs such as
+    Wireshark's take arrow keys and Enter, and one Ctrl+C stops the command.
+  * @agent works on a line recalled from history with the cursor at its
+    start (zsh's history-beginning-search-backward), and uses the whole
+    line wherever the cursor is.
+
+ -- m-tek39 <murcus39@gmail.com>  Mon, 28 Sep 2026 16:05:34 +0200
+
 promptline (0.1.0) unstable; urgency=medium
 
   * First Promptline release, based on Terminator 2.1.6: inline suggestions

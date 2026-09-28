@@ -17,6 +17,7 @@ because Promptline's history is public.
   | `config.py` | two lines merging `promptline_defaults.GLOBAL_DEFAULTS` and `PROFILE_DEFAULTS` into `DEFAULTS` |
   | `prefseditor.py` | add the Promptline page to the notebook |
   | `optionparse.py` | `-P/--personalise`, `--guardrails`, `--memory`: edit the file and exit, like `--list-profiles` |
+  | `notebook.py` | crash fixes: `remove()` passes the widget to `detach_tab()`, not the page number; `closetab()` tolerates a missing `last_active_term` entry. Keep whichever side upstream fixes. |
   | `util.py` | config directory name, first-run import of Terminator settings |
   | `ipc.py` | D-Bus name |
   | `version.py`, `setup.py`, `data/`, `doc/*.adoc` | identity (name, version, desktop entry, icons, man pages) |
