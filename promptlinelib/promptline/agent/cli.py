@@ -95,6 +95,11 @@ class TtyUI(object):
     def __init__(self, out=None, tty=None):
         self.out = out or sys.stdout
         self.tty = tty if tty is not None else sys.stdin.isatty()
+        # The spinner runs here while replies stream in from the provider's
+        # thread; the lock keeps them from writing over each other
+        self.lock = threading.Lock()
+        self.streaming = False
+        self.last_char = '\n'
 
     def write(self, text):
         self.out.write(text)
@@ -124,19 +129,40 @@ class TtyUI(object):
         thread.start()
         frame = 0
         while thread.is_alive():
-            if self.tty:
-                self.write('\r%s%s thinking%s' % (
-                    DIM, self.SPINNER[frame % len(self.SPINNER)], RESET))
+            with self.lock:
+                if self.tty and not self.streaming:
+                    self.write('\r%s%s thinking%s' % (
+                        DIM, self.SPINNER[frame % len(self.SPINNER)], RESET))
             frame += 1
             thread.join(0.12)
-        if self.tty:
-            self.write('\r\033[K')
+        with self.lock:
+            if self.tty and not self.streaming:
+                self.write('\r\033[K')
         if 'error' in result:
             raise result['error']
         return result['value']
 
     def say(self, text):
         self.write(text + '\n\n')
+
+    def stream(self, text):
+        """Print part of a reply as it arrives"""
+        with self.lock:
+            if not self.streaming:
+                text = text.lstrip()
+                if not text:
+                    return
+                if self.tty:
+                    self.out.write('\r\033[K')    # the spinner's line
+                self.streaming = True
+            self.write(text)
+            self.last_char = text[-1]
+
+    def end_stream(self):
+        with self.lock:
+            if self.streaming:
+                self.write('\n' if self.last_char == '\n' else '\n\n')
+            self.streaming = False
 
     def note(self, text):
         self.write(DIM + text + RESET + '\n')

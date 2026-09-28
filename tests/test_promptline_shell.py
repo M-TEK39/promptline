@@ -564,3 +564,42 @@ def test_agent_auto_review(home, history, agent_setup, monkeypatch):
     assert agent_setup.reviews == ['echo looked', 'echo pretend-restart']
     assert [(line[2], line[5]) for line in audit_lines(home)] == [
         ('auto-review', 'echo looked'), ('approved', 'echo pretend-restart')]
+
+
+def test_agent_streams_replies(home, history, agent_setup):
+    import json
+    import threading
+    server = agent_setup
+    release = threading.Event()
+
+    def do_POST(handler):
+        length = int(handler.headers['Content-Length'])
+        body = json.loads(handler.rfile.read(length))
+        server.requests.append(body)
+        assert body.get('stream') is True
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'text/event-stream')
+        handler.end_headers()
+
+        def send(delta):
+            chunk = {'choices': [{'delta': delta}]}
+            handler.wfile.write(('data: %s\n\n' % json.dumps(chunk)).encode())
+            handler.wfile.flush()
+        send({'content': 'First half is here'})
+        release.wait(20)            # the rest only after the test has looked
+        send({'content': ', and All done.'})
+        handler.wfile.write(b'data: [DONE]\n\n')
+        handler.close_connection = True
+    server.httpd.RequestHandlerClass.do_POST = do_POST
+
+    terminal, session, controller = start_shell(
+        shutil.which('bash'), str(home), {}, with_controller=True)
+    run_agent(terminal, session, controller, 'stream please')
+    try:
+        assert wait_for(lambda: 'First half is here' in screen_text(terminal),
+                        timeout=30), screen_text(terminal)
+        assert 'All done.' not in screen_text(terminal)
+    finally:
+        release.set()
+    assert agent_done(terminal, session), screen_text(terminal)
+    assert 'First half is here, and All done.' in screen_text(terminal)

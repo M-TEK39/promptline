@@ -6,13 +6,15 @@ The loop is independent of any terminal: it talks to the user through a UI
 object and runs commands through an executor, so it is tested with fakes.
 
 UI methods: thinking(fn) runs fn while showing progress and returns its
-result; say(text); approve(command, reason, note) -> ('approve'|'cancel',
+result; stream(text) and end_stream() for replies printed as they arrive;
+say(text) for replies that arrived whole; approve(command, reason, note) -> ('approve'|'cancel',
 command); auto_approved(command, mode, note); running(command);
 finished(status); note(text).
 
 >>> class Provider(object):
 ...     def __init__(self, replies): self.replies = list(replies)
-...     def chat(self, messages, tools): return self.replies.pop(0)
+...     def chat(self, messages, tools, on_text=None):
+...         return self.replies.pop(0)
 >>> class UI(object):
 ...     def __init__(self, answer): self.answer, self.log = answer, []
 ...     def thinking(self, fn): return fn()
@@ -122,10 +124,18 @@ class Agent(object):
         tools"""
         self.messages.append(user_message)
         for _step in range(self.max_steps):
+            streamed = []
+
+            def on_text(piece):
+                streamed.append(piece)
+                self.ui.stream(piece)
             reply = self.ui.thinking(
-                lambda: self.provider.chat(self.messages, TOOLS))
+                lambda: self.provider.chat(self.messages, TOOLS,
+                                           on_text=on_text))
             self.messages.append(reply)
-            if reply.get('content'):
+            if streamed:
+                self.ui.end_stream()
+            elif reply.get('content'):
                 self.ui.say(reply['content'].strip())
             calls = reply.get('tool_calls') or []
             if not calls:

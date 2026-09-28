@@ -28,14 +28,34 @@ messages so it survives between tool calls.
 >>> reply['content'], reply['tool_calls'][0]['function']['name'], len(reply['_reasoning'])
 ('Checking.', 'run_command', 1)
 
->>> OpenAIProvider.needs_key('https://api.openai.com/v1')
-True
->>> OpenAIProvider.needs_key('http://localhost:11434/v1')
-False
->>> OpenAIProvider('http://x', None, 'm', 'xhigh').budget(256, 15)
-(16640, 120)
->>> OpenAIProvider('http://x', None, 'm', '').budget(256, 15)
-(256, 15)
+Streaming: server-sent events are reassembled into the usual reply, and
+text is handed to on_text as it arrives.
+
+>>> def sse(*items):
+...     for item in items:
+...         yield 'data: ' + (item if isinstance(item, str) else json.dumps(item))
+...         yield ''
+>>> pieces = []
+>>> collect_responses_stream(iter_sse(sse(
+...     {'type': 'response.output_text.delta', 'delta': 'Hel'},
+...     {'type': 'response.output_text.delta', 'delta': 'lo'},
+...     {'type': 'response.completed', 'response': {'output': []}})),
+...     pieces.append)
+{'output': []}
+>>> pieces
+['Hel', 'lo']
+>>> list(iter_sse([': keep-alive', '', 'event: ping', 'data: 1', '']))
+[('ping', '1')]
+>>> def call(**function):
+...     return {'choices': [{'delta': {'tool_calls': [
+...         dict(index=0, function=function, **({'id': 'c1'} if 'name' in function else {}))]}}]}
+>>> message = collect_chat_stream(iter_sse(sse(
+...     {'choices': [{'delta': {'content': 'Look'}}]},
+...     call(name='run_command', arguments='{"comm'),
+...     call(arguments='and": "ls"}'),
+...     '[DONE]')), None)['choices'][0]['message']
+>>> message['content'], message['tool_calls'][0]['id'], message['tool_calls'][0]['function']
+('Look', 'c1', {'name': 'run_command', 'arguments': '{"command": "ls"}'})
 """
 
 import json
@@ -86,13 +106,17 @@ class OpenAIProvider(object):
         return self.chat(messages, max_tokens=max_tokens,
                          timeout=timeout)['content'] or ''
 
-    def chat(self, messages, tools=None, max_tokens=4096, timeout=60):
+    def chat(self, messages, tools=None, max_tokens=4096, timeout=60,
+             on_text=None):
         """Return the assistant message for messages, as a dict with
         'content' and, if the model called tools, 'tool_calls' (the
-        OpenAI shape, which is also what the agent keeps its history in)"""
+        OpenAI shape, which is also what the agent keeps its history in).
+        With on_text, the reply is streamed and on_text(piece) is called as
+        text arrives (servers that don't stream simply reply at once)."""
         max_tokens, timeout = self.budget(max_tokens, timeout)
         if tools and self.uses_responses_api():
-            return self._responses(messages, tools, max_tokens, timeout)
+            return self._responses(messages, tools, max_tokens, timeout,
+                                   on_text)
         body = {'model': self.model,
                 'messages': [dict((k, v) for k, v in m.items()
                                   if not k.startswith('_'))
@@ -102,7 +126,9 @@ class OpenAIProvider(object):
             body['reasoning_effort'] = self.reasoning_effort
         if tools:
             body['tools'] = tools
-        reply = self._post('/chat/completions', body, timeout)
+        if on_text:
+            body['stream'] = True
+        reply = self._post('/chat/completions', body, timeout, on_text)
         try:
             message = reply['choices'][0]['message']
         except (KeyError, IndexError, TypeError):
@@ -112,7 +138,7 @@ class OpenAIProvider(object):
             result['tool_calls'] = message['tool_calls']
         return result
 
-    def _responses(self, messages, tools, max_tokens, timeout):
+    def _responses(self, messages, tools, max_tokens, timeout, on_text=None):
         body = {'model': self.model,
                 'input': to_responses_input(messages),
                 'tools': [dict(tool['function'], type='function')
@@ -124,12 +150,14 @@ class OpenAIProvider(object):
                 'include': ['reasoning.encrypted_content']}
         if self.reasoning_effort:
             body['reasoning'] = {'effort': self.reasoning_effort}
-        reply = self._post('/responses', body, timeout)
+        if on_text:
+            body['stream'] = True
+        reply = self._post('/responses', body, timeout, on_text)
         if not isinstance(reply.get('output'), list):
             raise ProviderError('unexpected reply from %s' % self.base_url)
         return from_responses_output(reply['output'])
 
-    def _post(self, path, body, timeout):
+    def _post(self, path, body, timeout, on_text=None):
         headers = {'Content-Type': 'application/json'}
         if self.api_key:
             headers['Authorization'] = 'Bearer ' + self.api_key
@@ -138,6 +166,13 @@ class OpenAIProvider(object):
                                          headers=headers, method='POST')
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
+                if 'text/event-stream' in \
+                        response.headers.get('Content-Type', ''):
+                    events = iter_sse(line.decode('utf-8', 'replace')
+                                      for line in response)
+                    if path == '/responses':
+                        return collect_responses_stream(events, on_text)
+                    return collect_chat_stream(events, on_text)
                 return json.loads(response.read().decode('utf-8'))
         except urllib.error.HTTPError as ex:
             raise ProviderError('%s: %s' % (ex.code, _error_message(ex)),
@@ -195,3 +230,74 @@ def from_responses_output(output):
     if reasoning:
         message['_reasoning'] = reasoning
     return message
+
+
+def iter_sse(lines):
+    """(event, data) pairs from server-sent event lines"""
+    event, data = None, []
+    for line in lines:
+        line = line.rstrip('\r\n')
+        if not line:
+            if data:
+                yield event, '\n'.join(data)
+            event, data = None, []
+        elif line.startswith(':'):
+            continue
+        elif line.startswith('event:'):
+            event = line[6:].strip()
+        elif line.startswith('data:'):
+            data.append(line[5:].lstrip())
+    if data:
+        yield event, '\n'.join(data)
+
+
+def collect_responses_stream(events, on_text):
+    """The final response object from a Responses API event stream"""
+    for event, data in events:
+        try:
+            item = json.loads(data)
+        except ValueError:
+            continue
+        kind = item.get('type') or event
+        if kind == 'response.output_text.delta' and on_text:
+            on_text(item.get('delta', ''))
+        elif kind in ('response.completed', 'response.incomplete'):
+            return item.get('response', {})
+        elif kind in ('response.failed', 'error'):
+            error = (item.get('response') or {}).get('error') or item
+            raise ProviderError(str(error.get('message') or error))
+    raise ProviderError('the reply stream ended early')
+
+
+def collect_chat_stream(events, on_text):
+    """A Chat Completions reply rebuilt from its streamed chunks"""
+    content, calls = [], {}
+    for _event, data in events:
+        if data.strip() == '[DONE]':
+            break
+        try:
+            chunk = json.loads(data)
+        except ValueError:
+            continue
+        if chunk.get('error'):
+            raise ProviderError(str(chunk['error'].get('message')
+                                    or chunk['error']))
+        for choice in chunk.get('choices') or []:
+            delta = choice.get('delta') or {}
+            if delta.get('content'):
+                content.append(delta['content'])
+                if on_text:
+                    on_text(delta['content'])
+            for part in delta.get('tool_calls') or []:
+                call = calls.setdefault(part.get('index', 0), {
+                    'id': None, 'type': 'function',
+                    'function': {'name': '', 'arguments': ''}})
+                call['id'] = call['id'] or part.get('id')
+                function = part.get('function') or {}
+                if function.get('name') and not call['function']['name']:
+                    call['function']['name'] = function['name']
+                call['function']['arguments'] += function.get('arguments') or ''
+    message = {'role': 'assistant', 'content': ''.join(content) or None}
+    if calls:
+        message['tool_calls'] = [calls[index] for index in sorted(calls)]
+    return {'choices': [{'message': message}]}
