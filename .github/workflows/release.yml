@@ -23,7 +23,7 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends \
-          debhelper dh-python dpkg-dev gettext intltool python3 python3-setuptools \
+          build-essential debhelper dh-python dpkg-dev gettext intltool python3 python3-setuptools \
           desktop-file-utils appstream
 
     - name: Check versions agree
