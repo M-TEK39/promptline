@@ -14,7 +14,7 @@ import sys
 import subprocess
 import platform
 
-from promptlinelib.version import APP_NAME, APP_VERSION
+from promptlinelib.version import APP_NAME, APP_VERSION, APP_ID
 
 PO_DIR = 'po'
 MO_DIR = os.path.join('build', 'mo')
@@ -66,7 +66,7 @@ class BuildData(build):
       TOP_BUILDDIR='.'
       INTLTOOL_MERGE='intltool-merge'
     desktop_in='data/promptline.desktop.in'
-    desktop_data='data/promptline.desktop'
+    desktop_data='data/%s.desktop' % APP_ID
     rc = None
     if not self.distribution.without_gettext:
       rc = os.system ("C_ALL=C " + INTLTOOL_MERGE + " -d -u -c " + TOP_BUILDDIR +
@@ -78,7 +78,7 @@ class BuildData(build):
         [file_data.write(line.lstrip('_')) for line in file_in]
 
     appdata_in='data/promptline.appdata.xml.in'
-    appdata_data='data/promptline.metainfo.xml'
+    appdata_data='data/%s.metainfo.xml' % APP_ID
     rc = None
     if not self.distribution.without_gettext:
       rc = os.system ("C_ALL=C " + INTLTOOL_MERGE + " -x -u -c " + TOP_BUILDDIR +
@@ -194,8 +194,8 @@ setup(name=APP_NAME,
       license='GNU GPL v2',
       scripts=['promptline', 'promptline-remote', 'promptline-agent'],
       data_files=[
-                  ('share/applications', ['data/promptline.desktop']),
-                  ('share/metainfo', ['data/promptline.metainfo.xml']),
+                  ('share/applications', ['data/%s.desktop' % APP_ID]),
+                  ('share/metainfo', ['data/%s.metainfo.xml' % APP_ID]),
                   (os.path.join(man_dir, 'man1'), ['doc/promptline.1']),
                   (os.path.join(man_dir, 'man5'), ['doc/promptline_config.5']),
                   ('share/pixmaps', ['data/icons/hicolor/48x48/apps/promptline.png']),
@@ -232,7 +232,9 @@ setup(name=APP_NAME,
           'psutil',
       ],
       extras_require={'test': test_deps},
-      package_data={'promptlinelib': ['preferences.glade', 'layoutlauncher.glade'],
+      # themes/ is read from the package directory at runtime (terminator.py)
+      package_data={'promptlinelib': ['preferences.glade', 'layoutlauncher.glade',
+                                      'themes/*/gtk-3.0/apps/*.css'],
                     'promptlinelib.promptline': ['shell/promptline.bash',
                                                  'shell/promptline.zsh',
                                                  'shell/zdotdir/.zshenv']},

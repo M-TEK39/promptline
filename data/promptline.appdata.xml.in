@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Copyright 2013 Stephen Boddy <stephen.j.boddy@gmail.com> -->
 <component type="desktop">
- <id>promptline.desktop</id>
+ <id>io.github.m_tek39.Promptline</id>
+ <launchable type="desktop-id">io.github.m_tek39.Promptline.desktop</launchable>
  <metadata_license>CC0-1.0</metadata_license>
  <project_license>GPL-2.0-only</project_license>
  <_name>Promptline</_name>
@@ -23,7 +24,10 @@
    broadcast typing, profiles and plugins.
   </_p>
  </description>
- <url type="homepage">https://github.com/gnome-terminator/terminator</url>
- <updatecontact>terminator@lazyfrosch.de</updatecontact>
- <developer_name>The Terminator Team</developer_name>
+ <url type="homepage">https://github.com/M-TEK39/promptline</url>
+ <url type="bugtracker">https://github.com/M-TEK39/promptline/issues</url>
+ <developer id="io.github.m_tek39">
+  <name>Promptline contributors, building on the Terminator Team's work</name>
+ </developer>
+ <content_rating type="oars-1.1"/>
 </component>

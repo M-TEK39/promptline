@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "configure" ]; then
+    # Offered as a default terminal, at a lower priority than the desktop's
+    # own terminal so installing it doesn't change the default
+    update-alternatives --install /usr/bin/x-terminal-emulator \
+        x-terminal-emulator /usr/bin/promptline 30
+fi
+
+#DEBHELPER#

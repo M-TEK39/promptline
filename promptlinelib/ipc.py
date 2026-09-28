@@ -12,6 +12,7 @@ from .borg import Borg
 from .terminator import Terminator
 from .config import Config
 from .factory import Factory
+from .version import APP_ID
 from .util import dbg, err, enumerate_descendants
 from .terminal import Terminal
 from .container import Container
@@ -24,8 +25,8 @@ if not CONFIG['dbus']:
     raise ImportError
 
 # Promptline's own name, so it never hands off to (or from) Terminator
-BUS_BASE = 'io.github.m_tek39.Promptline'
-BUS_PATH = '/io/github/m_tek39/Promptline'
+BUS_BASE = APP_ID
+BUS_PATH = '/' + APP_ID.replace('.', '/')
 try:
     # Try and include the X11 display name in the dbus bus name
     DISPLAY = Gdk.get_display().partition('.')[0]

@@ -1,0 +1,28 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: Promptline
+Upstream-Contact: https://github.com/M-TEK39/promptline/issues
+Source: https://github.com/M-TEK39/promptline
+Comment: Promptline is based on Terminator
+ (https://github.com/gnome-terminator/terminator), started by Chris Jones
+ in 2007, maintained by Stephen Boddy and Matt Rose, with contributions
+ from the people listed in AUTHORS. The code Promptline inherits remains
+ theirs.
+
+Files: *
+Copyright: 2006-2010 Chris Jones <cmsj@tenshu.net>
+           2010-2026 The Terminator contributors (see AUTHORS)
+           2026 The Promptline contributors
+License: GPL-2
+
+License: GPL-2
+ This program is free software; you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation, version 2 only.
+ .
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+ .
+ On Debian systems, the complete text of the GNU General Public License
+ version 2 can be found in "/usr/share/common-licenses/GPL-2".

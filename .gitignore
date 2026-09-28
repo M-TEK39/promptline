@@ -23,5 +23,14 @@ promptlinelib/meliae
 ## language / intltool related files
 .intltool*
 data/promptline.appdata.xml
-data/promptline.desktop
-data/promptline.metainfo.xml
+data/*.desktop
+data/*.metainfo.xml
+
+# Debian package build
+.pybuild/
+debian/.debhelper/
+debian/promptline/
+debian/files
+debian/*.substvars
+debian/*.debhelper.log
+debian/debhelper-build-stamp

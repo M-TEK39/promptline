@@ -5,13 +5,13 @@ TryExec=promptline
 Exec=promptline
 Icon=promptline
 Type=Application
-Categories=GNOME;GTK;Utility;TerminalEmulator;System;
+Categories=GTK;System;TerminalEmulator;
 StartupNotify=true
 StartupWMClass=promptline
 X-Ubuntu-Gettext-Domain=promptline
-X-Ayatana-Desktop-Shortcuts=NewWindow;
 Keywords=terminal;shell;prompt;command;commandline;autocomplete;agent;ai;
-[NewWindow Shortcut Group]
-Name=Open a New Window
+Actions=new-window;
+
+[Desktop Action new-window]
+_Name=New Window
 Exec=promptline
-TargetEnvironment=Unity
