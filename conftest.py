@@ -9,3 +9,6 @@ import tempfile
 
 def pytest_configure(config):
     os.environ['XDG_CONFIG_HOME'] = tempfile.mkdtemp(prefix='promptline-test-')
+    # Use xvfb-run's X display, never the desktop's Wayland session
+    if os.environ.get('DISPLAY'):
+        os.environ['GDK_BACKEND'] = 'x11'

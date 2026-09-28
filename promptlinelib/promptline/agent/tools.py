@@ -12,9 +12,15 @@ b'out\\nerr\\n'
 'xxx\\n[... 4 characters omitted ...]\\nxxx'
 """
 
+import fcntl
 import os
+import pty
+import re
+import select
 import signal
 import subprocess
+import termios
+import tty
 
 OUTPUT_LIMIT = 16000
 
@@ -69,15 +75,20 @@ def trim_output(text, limit=OUTPUT_LIMIT):
         text[:head], len(text) - head - tail, text[-tail:])
 
 
-def run_command(command, cwd, shell, sink):
+def run_command(command, cwd, shell, sink, terminal=None):
     """Run command with shell -c in cwd, copying its output to sink (a
     binary stream) as it arrives. Returns (exit status, output text).
-    stdin stays the terminal, so password prompts still work."""
+
+    With terminal (the fd of the user's terminal), the command gets a
+    terminal of its own and the user's keys are passed through to it, so
+    full-screen programs (installer dialogs, pagers, editors) and password
+    prompts work. Ctrl+C interrupts the command and then the agent."""
+    if terminal is not None:
+        return run_in_terminal(command, cwd, shell, sink, terminal)
     process = subprocess.Popen([shell, '-c', command], cwd=cwd,
                                stdout=subprocess.PIPE,
                                stderr=subprocess.STDOUT)
-    chunks = []
-    size = 0
+    chunks = Output()
     try:
         while True:
             data = os.read(process.stdout.fileno(), 65536)
@@ -85,12 +96,7 @@ def run_command(command, cwd, shell, sink):
                 break
             sink.write(data)
             sink.flush()
-            size += len(data)
-            chunks.append(data)
-            # Keep memory bounded on runaway output: keep the first chunk
-            # and a window of the most recent ones
-            while size > OUTPUT_LIMIT * 8 and len(chunks) > 2:
-                size -= len(chunks.pop(1))
+            chunks.add(data)
         status = process.wait()
     except KeyboardInterrupt:
         process.send_signal(signal.SIGINT)
@@ -98,7 +104,106 @@ def run_command(command, cwd, shell, sink):
         raise
     finally:
         process.stdout.close()
-    if status < 0:
-        status = 128 - status
-    output = b''.join(chunks).decode('utf-8', 'replace')
-    return status, trim_output(output.rstrip())
+    return exit_status(status), chunks.text()
+
+
+def run_in_terminal(command, cwd, shell, sink, terminal):
+    """run_command, with the command on a pseudo-terminal that the user's
+    terminal is connected to while it runs"""
+    master, slave = pty.openpty()
+    copy_window_size(terminal, slave)
+
+    def controlling_terminal():
+        # The new session (start_new_session) takes the pty as its
+        # terminal, so Ctrl+C and full-screen programs work inside it
+        fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+
+    try:
+        process = subprocess.Popen([shell, '-c', command], cwd=cwd,
+                                   stdin=slave, stdout=slave, stderr=slave,
+                                   start_new_session=True,
+                                   preexec_fn=controlling_terminal)
+    finally:
+        os.close(slave)
+
+    previous_winch = signal.signal(
+        signal.SIGWINCH, lambda *_: copy_window_size(terminal, master))
+    saved = termios.tcgetattr(terminal)
+    chunks = Output()
+    interrupted = False
+    try:
+        # Raw: every key goes to the command, which has its own terminal
+        tty.setraw(terminal)
+        while True:
+            readable = select.select([master, terminal], [], [], 0.05)[0]
+            if terminal in readable:
+                data = os.read(terminal, 1024)
+                interrupted = interrupted or b'\x03' in data
+                os.write(master, data)
+            if master in readable:
+                try:
+                    data = os.read(master, 65536)
+                except OSError:     # EIO: the command's terminal closed
+                    data = b''
+                if not data:
+                    break
+                sink.write(data)
+                sink.flush()
+                chunks.add(data)
+            elif process.poll() is not None:
+                # Done, and nothing left to read (a background job it
+                # started may still hold the terminal open)
+                break
+        status = process.wait()
+    finally:
+        termios.tcsetattr(terminal, termios.TCSADRAIN, saved)
+        signal.signal(signal.SIGWINCH, previous_winch)
+        os.close(master)
+    if interrupted and status in (-signal.SIGINT, 128 + signal.SIGINT):
+        raise KeyboardInterrupt()
+    return exit_status(status), plain(chunks.text())
+
+
+def copy_window_size(source, target):
+    try:
+        size = fcntl.ioctl(source, termios.TIOCGWINSZ, b'\0' * 8)
+        fcntl.ioctl(target, termios.TIOCSWINSZ, size)
+    except OSError:
+        pass
+
+
+def exit_status(status):
+    """A shell-style exit status: 128 + N for death by signal N"""
+    return 128 - status if status < 0 else status
+
+
+# Colour, cursor movement and window titles: noise to the model
+ESCAPES = re.compile(r'\x1b(\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(\x07|\x1b\\)'
+                     r'|[()][0-9A-Za-z]|[=>78DEHMc])')
+
+
+def plain(text):
+    r"""Terminal output as text for the model
+
+    >>> plain('\x1b[1;31mred\x1b[0m line\r\n\x1b]0;title\x07next\r\n')
+    'red line\nnext'
+    """
+    return ESCAPES.sub('', text).replace('\r\n', '\n').strip()
+
+
+class Output(object):
+    """Collects a command's output, bounded: on runaway output it keeps
+    the first chunk and a window of the most recent ones"""
+    def __init__(self):
+        self.chunks = []
+        self.size = 0
+
+    def add(self, data):
+        self.chunks.append(data)
+        self.size += len(data)
+        while self.size > OUTPUT_LIMIT * 8 and len(self.chunks) > 2:
+            self.size -= len(self.chunks.pop(1))
+
+    def text(self):
+        output = b''.join(self.chunks).decode('utf-8', 'replace')
+        return trim_output(output.rstrip())

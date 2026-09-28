@@ -234,10 +234,11 @@ def main(argv=None):
     cwd = request.get('cwd') or os.getcwd()
     shell = request.get('shell') or os.environ.get('SHELL', '/bin/sh')
     out = sys.stdout.buffer
+    terminal = sys.stdin.fileno() if sys.stdin.isatty() else None
 
     def executor(command):
         sys.stdout.flush()
-        return run_command(command, cwd, shell, out)
+        return run_command(command, cwd, shell, out, terminal)
 
     store = ConversationStore(request.get('terminal'))
     history = store.load()

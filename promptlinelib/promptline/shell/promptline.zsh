@@ -50,6 +50,12 @@ _promptline_line_init() {
     _promptline_mark input 1
 }
 
+# How much of the line follows the cursor: history search can leave the
+# cursor at the start of a recalled line
+_promptline_redraw() {
+    _promptline_mark after ${#RBUFFER}
+}
+
 _promptline_setup() {
     precmd_functions=(${precmd_functions:#_promptline_setup})
     # First in line, so it sees the real exit status
@@ -57,6 +63,7 @@ _promptline_setup() {
     preexec_functions+=(_promptline_preexec)
     autoload -Uz add-zle-hook-widget
     add-zle-hook-widget zle-line-init _promptline_line_init
+    add-zle-hook-widget zle-line-pre-redraw _promptline_redraw
     _promptline_report_cwd
 }
 
