@@ -68,12 +68,15 @@ dpkg-buildpackage -us -uc -b       # Debian package → ../promptline_<version>_
 debian/rules clean                 # remove .pybuild/ and debian/promptline/ afterwards
 ```
 
-- **Packaging** is `debian/` (native, pybuild over `setup.py`). **Releasing:** bump
-  `APP_VERSION` in `promptlinelib/version.py`, add a `debian/changelog` entry with the
-  same version (its bullets become the release notes), commit, then push a tag
-  `vX.Y.Z`. `.github/workflows/release.yml` checks that the three agree, builds and
-  validates the `.deb`, and publishes a GitHub release with it and `SHA256SUMS`.
-  Running that workflow by hand only builds, and keeps the `.deb` as an artifact.
+- **Branches and releases** follow `CONTRIBUTING.md`: every change reaches `master` or a
+  `release/X.Y.x` branch through a pull request (rulesets block direct and force pushes),
+  and releases are tagged on the release branch. **Releasing:** in a PR to the release
+  branch, bump `APP_VERSION` in `promptlinelib/version.py` and add a `debian/changelog`
+  entry with the same version (its bullets become the release notes). After it merges,
+  tag the merge commit `vX.Y.Z`. `.github/workflows/release.yml` checks that the three
+  agree, builds and validates the `.deb`, and publishes a GitHub release with it and
+  `SHA256SUMS`; on pull requests into a release branch it only builds and checks.
+  Then merge the release branch into `master` through a PR.
   Tagging publishes to the public repo, so only do it when the user asks. The desktop file and AppStream ID is `APP_ID`
   (`io.github.m_tek39.Promptline`). Files the app reads at runtime from its package
   directory (glade, `themes/`, `promptline/shell/`) must be listed in
@@ -84,9 +87,8 @@ debian/rules clean                 # remove .pybuild/ and debian/promptline/ aft
   tests. Promptline's pure modules keep their unit tests as doctests.
 - The root `conftest.py` points `XDG_CONFIG_HOME` at a temp dir for the whole run, because
   upstream's Preferences tests write `config_cur` into the real config dir. Keep it.
-- Known local failure: `test_prefseditor_keybindings.py::...[input_key_params2-...]` fails
-  on the maintainer's machine even with unmodified upstream Terminator (it depends on the
-  keyboard setup) and passes in CI. Anything else failing is yours.
+- `conftest.py` also sets `GDK_BACKEND=x11` under `xvfb-run`, so tests never open windows
+  on the desktop's Wayland session. The whole suite passes locally; anything failing is yours.
 - Drawing suggestions needs `python3-gi-cairo`. Without it, suggestions are computed but
   not drawn, and one error is logged.
 - Test live against a provider only when the user asks, and keep it to one or two
