@@ -45,3 +45,33 @@ jobs:
     - name: Run tests
       run: |
         xvfb-run -a pytest-3
+
+  promptline:
+    # Ubuntu 22.04's VTE predates termprops, so above Promptline stays plain
+    # Terminator and its end-to-end tests skip. Here they run.
+    name: promptline (ubuntu 26.04)
+    runs-on: ubuntu-latest
+    container: ubuntu:26.04
+
+    steps:
+    - name: Install dependencies
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      # The package's runtime dependencies (debian/control), then the tests'
+      run: |
+        apt-get update
+        apt-get install -y --no-install-recommends \
+          ca-certificates git \
+          gir1.2-glib-2.0 gir1.2-gtk-3.0 gir1.2-pango-1.0 gir1.2-vte-2.91 gsettings-desktop-schemas \
+          python3-cairo python3-configobj python3-dbus python3-gi python3-gi-cairo python3-psutil \
+          gir1.2-keybinder-3.0 gir1.2-notify-0.7 \
+          python3-pytest xvfb xauth libxtst6 bash zsh
+
+    - uses: actions/checkout@v4
+
+    - name: Check VTE has termprops
+      # Otherwise the end-to-end tests would all skip and this job would pass
+      run: python3 -c "from promptlinelib.promptline import marks; assert marks.INSTALLED, 'VTE without termprops'"
+
+    - name: Run tests
+      run: xvfb-run -a pytest-3

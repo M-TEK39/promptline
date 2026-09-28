@@ -70,7 +70,7 @@ python3 promptline -u              # run from the source tree; -u = don't hand o
 python3 promptline -u -d           # debug output (Promptline logs "promptline mark ...", predictions)
 python3 promptline -g /tmp/cfg     # alternate config file (or set XDG_CONFIG_HOME)
 
-xvfb-run -a pytest                 # full suite (CI runs this, on Python 3.10)
+xvfb-run -a pytest                 # full suite (CI: Ubuntu 22.04 / Python 3.10, and Ubuntu 26.04 for the end-to-end tests)
 xvfb-run -a pytest tests/test_promptline_shell.py   # end-to-end: real bash/zsh in a real VTE
 xvfb-run -a pytest promptlinelib/promptline         # Promptline doctests
 python -m compileall -f promptlinelib/ tests/ promptline-remote promptline promptline-agent
