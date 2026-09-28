@@ -90,3 +90,26 @@ def test_import_terminator_config(monkeypatch, tmp_path):
     (tmp_path / 'promptline' / 'config').write_text('mine')
     util.import_terminator_config()
     assert (tmp_path / 'promptline' / 'config').read_text() == 'mine'
+
+
+def test_full_permission_needs_guardrails(config, monkeypatch, tmp_path):
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
+    saved = config['promptline_agent_mode']
+    try:
+        config['promptline_agent_mode'] = 'ask'
+        page = prefs.PromptlinePage(config)
+        page.mode_combo.set_active_id('full')
+        assert page.mode_combo.get_active_id() == 'ask'
+        assert config['promptline_agent_mode'] == 'ask'
+        assert page.mode_note.get_text().startswith(
+            'Full permission is locked')
+
+        (tmp_path / 'promptline').mkdir(exist_ok=True)
+        (tmp_path / 'promptline' / 'guardrails.md').write_text(
+            '<!-- hint -->\n- never touch prod\n- no scans outside the lab\n'
+            '- ask before deleting anything\n')
+        page.mode_combo.set_active_id('full')
+        assert config['promptline_agent_mode'] == 'full'
+        assert page.mode_note.get_text().startswith('DANGEROUS')
+    finally:
+        config['promptline_agent_mode'] = saved

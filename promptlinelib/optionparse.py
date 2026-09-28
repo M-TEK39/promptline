@@ -107,6 +107,15 @@ icon for the window (by file or name)'))
             help=_('List all profiles'))
     parser.add_argument('--list-layouts', action='store_true', dest='list_layouts',
             help=_('List all layouts'))
+    parser.add_argument('-P', '--personalise', action='store_const',
+            const='personal', dest='promptline_edit',
+            help=_('Describe your work, tools and environments to Promptline'))
+    parser.add_argument('--guardrails', action='store_const',
+            const='guardrails', dest='promptline_edit',
+            help=_("Edit your rules for the agent (needed for Full permission mode)"))
+    parser.add_argument('--memory', action='store_const',
+            const='memory', dest='promptline_edit',
+            help=_("Review or edit what the agent remembers about you"))
 
     for item in ['--sm-client-id', '--sm-config-prefix', '--screen', '-n',
                  '--no-gconf' ]:
@@ -128,6 +137,9 @@ icon for the window (by file or name)'))
         for l in Terminator().config.list_layouts():
             print(l)
         sys.exit(0)
+    if options.promptline_edit:
+        from .promptline import personal
+        sys.exit(personal.edit_and_report(options.promptline_edit))
 
     if options.debug_classes or options.debug_methods:
         if not options.debug > 0:

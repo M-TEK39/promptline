@@ -27,6 +27,9 @@ import threading
 import time
 
 from . import read_request, runtime_dir, write_prefill
+from .. import personal
+from .approval import ALLOW, AskEveryTime, AutoReview, FullPermission, \
+    ModelReviewer, ReviewStream
 from .loop import Agent
 from .prompts import system_prompt, user_message
 from .tools import run_command
@@ -39,6 +42,7 @@ STORED_TOOL_OUTPUT = 4000
 BOLD = '\033[1m'
 DIM = '\033[2m'
 ACCENT = '\033[36m'
+WARN = '\033[33m'
 RESET = '\033[0m'
 
 
@@ -92,6 +96,11 @@ class TtyUI(object):
     def __init__(self, out=None, tty=None):
         self.out = out or sys.stdout
         self.tty = tty if tty is not None else sys.stdin.isatty()
+        # The spinner runs here while replies stream in from the provider's
+        # thread; the lock keeps them from writing over each other
+        self.lock = threading.Lock()
+        self.streaming = False
+        self.last_char = '\n'
 
     def write(self, text):
         self.out.write(text)
@@ -108,7 +117,7 @@ class TtyUI(object):
         self.write('\033[1A\r\033[2K' * rows + prompt_prefix + BOLD +
                    '@agent' + RESET + ' ' + query + '\n')
 
-    def thinking(self, fn):
+    def thinking(self, fn, label='thinking'):
         result = {}
 
         def work():
@@ -121,13 +130,16 @@ class TtyUI(object):
         thread.start()
         frame = 0
         while thread.is_alive():
-            if self.tty:
-                self.write('\r%s%s thinking%s' % (
-                    DIM, self.SPINNER[frame % len(self.SPINNER)], RESET))
+            with self.lock:
+                if self.tty and not self.streaming:
+                    self.write('\r%s%s %s%s' % (
+                        DIM, self.SPINNER[frame % len(self.SPINNER)], label,
+                        RESET))
             frame += 1
             thread.join(0.12)
-        if self.tty:
-            self.write('\r\033[K')
+        with self.lock:
+            if self.tty and not self.streaming:
+                self.write('\r\033[K')
         if 'error' in result:
             raise result['error']
         return result['value']
@@ -135,16 +147,89 @@ class TtyUI(object):
     def say(self, text):
         self.write(text + '\n\n')
 
+    def stream(self, text):
+        """Print part of a reply as it arrives"""
+        with self.lock:
+            if not self.streaming:
+                text = text.lstrip()
+                if not text:
+                    return
+                if self.tty:
+                    self.out.write('\r\033[K')    # the spinner's line
+                self.streaming = True
+            self.write(text)
+            self.last_char = text[-1]
+
+    def end_stream(self):
+        with self.lock:
+            if self.streaming:
+                self.write('\n' if self.last_char == '\n' else '\n\n')
+            self.streaming = False
+
     def note(self, text):
         self.write(DIM + text + RESET + '\n')
 
     def error(self, text):
         self.write(BOLD + 'promptline-agent: ' + RESET + text + '\n')
 
-    def approve(self, command, reason):
+    def mode_banner(self, mode):
+        if mode == 'auto-review':
+            self.note('Auto-review: commands the reviewer judges safe run '
+                      'without asking.')
+        elif mode == 'full':
+            self.write(WARN + BOLD + 'Full permission mode:' + RESET + WARN +
+                       ' commands run without asking (a few dangerous ones '
+                       'still ask).' + RESET + '\n')
+
+    def auto_approved(self, command, mode, note):
+        self.write('  ' + BOLD + '$ ' + command + RESET + '  ' + DIM +
+                   '(%s)' % (note or 'full permission') + RESET + '\n')
+
+    def review_start(self, command, reason):
+        """Show the command while the reviewer looks at it"""
+        self.review = ReviewStream()
         if reason:
             self.write(DIM + reason + RESET + '\n')
         self.write('  ' + BOLD + '$ ' + command + RESET + '\n')
+
+    def review_text(self, piece):
+        """Print the reviewer's reason as it arrives (provider's thread)"""
+        text = self.review.feed(piece)
+        with self.lock:
+            if not self.streaming:
+                text = text.lstrip()
+                if not text:
+                    return
+                if self.tty:
+                    self.out.write('\r\033[K')    # the spinner's line
+                self.streaming = True
+                self.write(DIM + '  reviewer: ' if self.review.verdict ==
+                           'safe' else WARN + 'Reviewer: ')
+            self.write(text)
+
+    def review_end(self, decision):
+        with self.lock:
+            streamed, self.streaming = self.streaming, False
+        if streamed:
+            self.write(RESET + '\n')
+        # Show the decision's own note if nothing streamed, or if it isn't
+        # what streamed (the review failed part way, say)
+        agrees = streamed and (self.review.verdict == 'safe') == (
+            decision.action == ALLOW) and not \
+            (decision.note or '').startswith('Review failed')
+        if decision.note and not agrees:
+            if decision.action == ALLOW:
+                self.write('  ' + DIM + decision.note + RESET + '\n')
+            else:
+                self.write(WARN + decision.note + RESET + '\n')
+
+    def approve(self, command, reason, note=None, shown=False):
+        if not shown:
+            if reason:
+                self.write(DIM + reason + RESET + '\n')
+            if note:
+                self.write(WARN + note + RESET + '\n')
+            self.write('  ' + BOLD + '$ ' + command + RESET + '\n')
         if not self.tty:
             self.note('Not running it: no terminal to ask for approval.')
             return 'cancel', command
@@ -200,6 +285,68 @@ class TtyUI(object):
         self.write('\n')
 
 
+class AuditLog(object):
+    """Every command the agent runs, and how it was allowed to run:
+    time, mode, approval, exit status, directory, command (tab-separated)"""
+    def __init__(self, cwd, mode, filename=None):
+        self.cwd = cwd
+        self.mode = mode
+        self.filename = filename or os.path.join(
+            os.path.dirname(personal.path('memory')), 'agent-audit.log')
+
+    def __call__(self, command, how, status):
+        line = '\t'.join([time.strftime('%Y-%m-%dT%H:%M:%S%z'), self.mode,
+                          how, 'exit=%s' % status, self.cwd,
+                          ' '.join(command.split('\n'))]) + '\n'
+        try:
+            os.makedirs(os.path.dirname(self.filename), mode=0o700,
+                        exist_ok=True)
+            fd = os.open(self.filename,
+                         os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+            with os.fdopen(fd, 'a', encoding='utf-8') as handle:
+                handle.write(line)
+        except OSError:
+            pass
+
+
+def choose_policy(ui, options, settings, query, cwd, guardrails):
+    """The approval policy for this run, and the mode it implements. Full
+    permission falls back to asking unless the user's guardrails are set."""
+    mode = options.get('mode', 'ask')
+    if mode == 'full':
+        ready, why = personal.guardrails_ready()
+        if not ready:
+            ui.note('Full permission mode is locked: %s (`promptline '
+                    '--guardrails`). Asking before each command instead.'
+                    % why)
+            mode = 'ask'
+    if mode == 'full':
+        return FullPermission(), mode
+    if mode == 'auto-review':
+        review = dict(settings or {}, reasoning=options.get(
+            'review_reasoning', 'medium'))
+        reviewer = make_provider('agent', review)
+        if reviewer is not None:
+            return AutoReview(ModelReviewer(reviewer, query, cwd,
+                                            guardrails)), mode
+    return AskEveryTime(), 'ask'
+
+
+def first_time_tip(ui):
+    """Once: point out personalisation, which helps from the first request"""
+    marker = os.path.join(os.path.dirname(personal.path('memory')),
+                          'personalisation-tip')
+    if os.path.exists(marker):
+        return
+    ui.note('Tip: tell Promptline about your work, tools and environments '
+            'with `promptline -P`.')
+    try:
+        os.makedirs(os.path.dirname(marker), mode=0o700, exist_ok=True)
+        open(marker, 'w').close()
+    except OSError:
+        pass
+
+
 def main(argv=None):
     argv = sys.argv if argv is None else argv
     if len(argv) != 2:
@@ -226,9 +373,10 @@ def main(argv=None):
 
     provider = make_provider('agent', request.get('settings'))
     if provider is None:
-        ui.error('no API key found. Set OPENAI_API_KEY for Terminator, or '
-                 'point promptline_api_key_file in ~/.config/terminator/'
-                 'config at a file containing the key.')
+        ui.error('no API key found. Set OPENAI_API_KEY for Promptline, or '
+                 'point promptline_api_key_file in ~/.config/promptline/'
+                 'config at a file containing the key (Preferences > '
+                 'Promptline).')
         return 1
 
     cwd = request.get('cwd') or os.getcwd()
@@ -240,10 +388,24 @@ def main(argv=None):
         sys.stdout.flush()
         return run_command(command, cwd, shell, out, terminal)
 
+    memory = personal.Memory()
+    about = personal.personal_text()
+    if not about and not memory.facts():
+        first_time_tip(ui)
+
+    guardrails = personal.guardrail_rules()
+    policy, mode = choose_policy(ui, request.get('agent') or {},
+                                 request.get('settings'), query, cwd,
+                                 guardrails)
+    ui.mode_banner(mode)
+
     store = ConversationStore(request.get('terminal'))
     history = store.load()
-    agent = Agent(provider, ui, executor, messages=[
-        {'role': 'system', 'content': system_prompt(shell)}] + history)
+    prompt = system_prompt(shell, mode=mode, personal=about,
+                           memory=memory.text(), guardrails=guardrails)
+    agent = Agent(provider, ui, executor, policy=policy, memory=memory,
+                  audit=AuditLog(cwd, mode), messages=[
+                      {'role': 'system', 'content': prompt}] + history)
     try:
         agent.run(user_message(request))
     except KeyboardInterrupt:

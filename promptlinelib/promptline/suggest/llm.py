@@ -40,6 +40,10 @@ from ..providers import ProviderError
 
 RECENT_COMMANDS = 8
 OUTPUT_TAIL = 1500
+# Personalisation and memory ride along with every prediction, so keep them
+# short
+PERSONAL_LIMIT = 2000
+MEMORY_LIMIT = 1500
 LISTING_ENTRIES = 40
 MAX_COMMAND = 400
 
@@ -50,8 +54,10 @@ SYSTEM_PROMPT = (
     "typing, your command must begin with exactly what they typed. Use "
     "the recent commands, their exit statuses and the last output to "
     "anticipate the next step (for example the fix for a command that "
-    "just failed). Prefer commands and files that exist in this context. "
-    "If you have no useful prediction, reply with nothing.")
+    "just failed). Prefer commands and files that exist in this context, "
+    "and the tools, hosts and habits the user describes under 'About the "
+    "user' and 'Remembered about the user' over generic choices. If you "
+    "have no useful prediction, reply with nothing.")
 
 _SECRETS = [
     (re.compile(r'(?i)\b(authorization:\s*(?:bearer|basic|token)\s+)\S+?(?=["\'\s]|$)'),
@@ -108,11 +114,20 @@ def listing(cwd):
     return ', '.join(names)
 
 
-def build_messages(typed, cwd, records, shell=None):
+def build_messages(typed, cwd, records, shell=None, personal='', memory=''):
     """Messages asking for a prediction. records are CommandRecords,
-    oldest first."""
+    oldest first; personal and memory come from personal.py.
+
+    >>> build_messages('nm', None, [], 'zsh', personal='SOC analyst',
+    ...                memory='- Uses Nessus, not nmap')[1]['content']
+    'Shell: zsh on Linux\\nAbout the user:\\nSOC analyst\\nRemembered about the user:\\n- Uses Nessus, not nmap\\nTyped so far: nm'
+    """
     shell = os.path.basename(shell or os.environ.get('SHELL', 'sh'))
     lines = ['Shell: %s on %s' % (shell, platform.system())]
+    if personal:
+        lines += ['About the user:', personal[:PERSONAL_LIMIT]]
+    if memory:
+        lines += ['Remembered about the user:', memory[:MEMORY_LIMIT]]
     if cwd:
         branch = git_branch(cwd)
         lines.append('Directory: %s%s' % (cwd, ' (git branch %s)' % branch

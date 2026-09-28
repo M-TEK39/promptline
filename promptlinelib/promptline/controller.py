@@ -15,6 +15,7 @@ gi.require_version('Gdk', '3.0')
 gi.require_version('Vte', '2.91')
 from gi.repository import GLib, Gdk, Gtk, Vte
 
+from ..config import Config
 from ..signalman import Signalman
 from ..util import dbg
 from .. import promptline
@@ -22,6 +23,7 @@ from . import marks
 from .agent import agent_program, parse_invocation, take_prefill, \
     write_request
 from .ghost import GhostText
+from . import personal
 from .providers import make_provider, provider_settings
 from .session import ShellSession
 from .suggest import Suggester
@@ -236,7 +238,9 @@ class Controller(object):
 
     def predict(self, key, typed, cwd):
         self.predict_id = None
-        messages = build_messages(typed, cwd, list(self.session.log))
+        messages = build_messages(typed, cwd, list(self.session.log),
+                                  personal=personal.personal_text(),
+                                  memory=personal.Memory().text())
         self.predictor.request(key, typed, messages, self.on_prediction)
         return False
 
@@ -300,6 +304,10 @@ class Controller(object):
             'records': [record.as_dict() for record in self.session.log
                         if not record.private],
             'settings': provider_settings('agent'),
+            'agent': {
+                'mode': Config()['promptline_agent_mode'],
+                'review_reasoning': Config()['promptline_review_reasoning'],
+            },
         }
         try:
             token = write_request(request, query)

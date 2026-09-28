@@ -302,6 +302,12 @@ def agent_setup(monkeypatch, tmp_path, fake_openai):
     runtime = tmp_path / 'runtime'
     runtime.mkdir()
     monkeypatch.setenv('XDG_RUNTIME_DIR', str(runtime))
+    # Personalisation, guardrails and memory for this test only
+    (tmp_path / 'config' / 'promptline').mkdir(parents=True)
+    (tmp_path / 'config' / 'promptline' / 'personal.md').write_text(
+        '<!-- hint -->\n## My role\nSOC analyst\n## Tools I avoid\n')
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'config'))
+    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'data'))
     monkeypatch.setenv('PYTHONPATH', os.path.dirname(program))
     monkeypatch.setattr(agent_module, 'agent_program', lambda: program)
     monkeypatch.setattr(controller_module, 'agent_program', lambda: program)
@@ -331,6 +337,9 @@ def test_agent(name, home, history, agent_setup):
     steps = [
         {'tool_calls': [tool_call('run_command', command='echo agent-ran',
                                   reason='check something')]},
+        {'tool_calls': [tool_call('remember',
+                                  fact='Uses Nessus for enterprise scans',
+                                  replaces='')]},
         {'tool_calls': [tool_call('place_on_prompt', command='cd /tmp')]},
         {'content': 'All done.'},
     ]
@@ -376,7 +385,16 @@ def test_agent(name, home, history, agent_setup):
         first = server.requests[0]
         assert first['model'] == 'agent-model'
         assert [t['function']['name'] for t in first['tools']] == \
-            ['run_command', 'place_on_prompt']
+            ['run_command', 'place_on_prompt', 'remember', 'forget']
+        # Personalisation reaches the agent (hints and empty sections don't)
+        system = first['messages'][0]['content']
+        assert 'About the user, in their own words:\n## My role\nSOC analyst' \
+            in system
+        assert 'hint' not in system and 'Tools I avoid' not in system
+        # ...and the memory it saved is on disk and was announced
+        memory = home / 'data' / 'promptline' / 'memory.md'
+        assert '- Uses Nessus for enterprise scans' in memory.read_text()
+        assert 'Remembered: Uses Nessus for enterprise scans' in screen
         request = first['messages'][-1]['content']
         assert "Request: what's wrong?" in request
         assert 'ls /nonexistent-dir' in request and '[exit 2]' in request
@@ -416,22 +434,33 @@ def test_termprops_registered_before_first_terminal():
     assert 'CRITICAL' not in result.stderr
 
 
-def scripted(server, steps):
-    """Make the fake server play `steps` as the agent's replies"""
+def scripted(server, steps, review=None):
+    """Make the fake server play `steps` as the agent's replies, and answer
+    auto-review requests with review(command) -> (verdict, reason)"""
     import json
 
     def do_POST(handler):
         length = int(handler.headers['Content-Length'])
         body = json.loads(handler.rfile.read(length))
-        server.requests.append(body)
-        message = dict({'role': 'assistant', 'content': None},
-                       **steps[len(server.requests) - 1])
+        system = body['messages'][0]['content']
+        if system.startswith('You review shell commands'):
+            command = body['messages'][-1]['content'].split(
+                'Command: ')[1].split('\n')[0]
+            verdict, reason = review(command)
+            message = {'role': 'assistant',
+                       'content': '%s: %s' % (verdict.upper(), reason)}
+            server.reviews.append(command)
+        else:
+            server.requests.append(body)
+            message = dict({'role': 'assistant', 'content': None},
+                           **steps[len(server.requests) - 1])
         data = json.dumps({'choices': [{'message': message}]}).encode()
         handler.send_response(200)
         handler.send_header('Content-Type', 'application/json')
         handler.send_header('Content-Length', str(len(data)))
         handler.end_headers()
         handler.wfile.write(data)
+    server.reviews = []
     server.httpd.RequestHandlerClass.do_POST = do_POST
 
 
@@ -440,15 +469,148 @@ def run_agent(terminal, session, controller, question):
     assert press(controller, Gdk.KEY_Return)
 
 
+def agent_done(terminal, session):
+    return wait_for(lambda: session.state == session.PROMPT and
+                    'All done.' in screen_text(terminal), timeout=30)
+
+
+def audit_lines(home):
+    log = home / 'data' / 'promptline' / 'agent-audit.log'
+    return [line.split('\t') for line in log.read_text().splitlines()]
+
+
+def test_agent_full_permission(home, history, agent_setup, monkeypatch):
+    monkeypatch.setattr(controller_module, 'Config', lambda: {
+        'promptline_agent_mode': 'full',
+        'promptline_review_reasoning': 'low'})
+    (home / 'config' / 'promptline' / 'guardrails.md').write_text(
+        '- Never touch production\n- No scans outside 10.20.0.0/16\n'
+        '- Ask before deleting anything\n')
+    scripted(agent_setup, [
+        {'tool_calls': [tool_call('run_command', command='echo unasked',
+                                  reason='harmless')]},
+        {'tool_calls': [tool_call('run_command', command='sudo reboot',
+                                  reason='apply changes')]},
+        {'content': 'All done.'},
+    ])
+    terminal, session, controller = start_shell(
+        shutil.which('bash'), str(home), {}, with_controller=True)
+    run_agent(terminal, session, controller, 'do it')
+    # The hard stop still asks, even in full permission mode
+    assert wait_for(lambda: 'Always asks: shuts down' in screen_text(terminal),
+                    timeout=30), screen_text(terminal)
+    terminal.vte.feed_child(b'c')
+    assert agent_done(terminal, session), screen_text(terminal)
+
+    screen = screen_text(terminal)
+    assert 'Full permission mode:' in screen
+    assert 'unasked' in screen
+    system = agent_setup.requests[0]['messages'][0]['content']
+    assert 'full permission mode' in system
+    assert '- Ask before deleting anything' in system
+    declined = agent_setup.requests[2]['messages'][-1]['content']
+    assert declined.startswith('The user declined') and 'shuts down' in declined
+    [(_, mode, how, status, _cwd, command)] = audit_lines(home)
+    assert (mode, how, status, command) == ('full', 'full', 'exit=0',
+                                            'echo unasked')
+
+
+def test_agent_full_permission_locked(home, history, agent_setup,
+                                      monkeypatch):
+    monkeypatch.setattr(controller_module, 'Config', lambda: {
+        'promptline_agent_mode': 'full',
+        'promptline_review_reasoning': 'low'})
+    scripted(agent_setup, [
+        {'tool_calls': [tool_call('run_command', command='echo hi',
+                                  reason='check')]},
+        {'content': 'All done.'},
+    ])
+    terminal, session, controller = start_shell(
+        shutil.which('bash'), str(home), {}, with_controller=True)
+    run_agent(terminal, session, controller, 'hello')
+    assert wait_for(lambda: '[a]pprove' in screen_text(terminal), timeout=30)
+    assert 'Full permission mode is locked' in screen_text(terminal)
+    terminal.vte.feed_child(b'a')
+    assert agent_done(terminal, session)
+    # The agent was told it is in ask mode, not full
+    system = agent_setup.requests[0]['messages'][0]['content']
+    assert 'The user approves each one' in system
+    assert 'full permission mode' not in system
+
+
+def test_agent_auto_review(home, history, agent_setup, monkeypatch):
+    monkeypatch.setattr(controller_module, 'Config', lambda: {
+        'promptline_agent_mode': 'auto-review',
+        'promptline_review_reasoning': 'low'})
+    scripted(agent_setup, [
+        {'tool_calls': [tool_call('run_command', command='echo looked',
+                                  reason='read-only check')]},
+        {'tool_calls': [tool_call('run_command',
+                                  command='echo pretend-restart',
+                                  reason='restart the service')]},
+        {'content': 'All done.'},
+    ], review=lambda command: ('safe', 'only prints text')
+       if 'looked' in command else ('ask', 'restarts a service'))
+    terminal, session, controller = start_shell(
+        shutil.which('bash'), str(home), {}, with_controller=True)
+    run_agent(terminal, session, controller, 'check and restart')
+    assert wait_for(lambda: 'Reviewer: restarts a service' in
+                    screen_text(terminal), timeout=30), screen_text(terminal)
+    terminal.vte.feed_child(b'a')
+    assert agent_done(terminal, session), screen_text(terminal)
+
+    screen = screen_text(terminal)
+    assert '$ echo looked\n  reviewer: only prints text' in screen
+    assert '$ echo pretend-restart\nReviewer: restarts a service\n' \
+        '  [a]pprove' in screen
+    assert agent_setup.reviews == ['echo looked', 'echo pretend-restart']
+    assert [(line[2], line[5]) for line in audit_lines(home)] == [
+        ('auto-review', 'echo looked'), ('approved', 'echo pretend-restart')]
+
+
+def test_agent_streams_replies(home, history, agent_setup):
+    import json
+    import threading
+    server = agent_setup
+    release = threading.Event()
+
+    def do_POST(handler):
+        length = int(handler.headers['Content-Length'])
+        body = json.loads(handler.rfile.read(length))
+        server.requests.append(body)
+        assert body.get('stream') is True
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'text/event-stream')
+        handler.end_headers()
+
+        def send(delta):
+            chunk = {'choices': [{'delta': delta}]}
+            handler.wfile.write(('data: %s\n\n' % json.dumps(chunk)).encode())
+            handler.wfile.flush()
+        send({'content': 'First half is here'})
+        release.wait(20)            # the rest only after the test has looked
+        send({'content': ', and All done.'})
+        handler.wfile.write(b'data: [DONE]\n\n')
+        handler.close_connection = True
+    server.httpd.RequestHandlerClass.do_POST = do_POST
+
+    terminal, session, controller = start_shell(
+        shutil.which('bash'), str(home), {}, with_controller=True)
+    run_agent(terminal, session, controller, 'stream please')
+    try:
+        assert wait_for(lambda: 'First half is here' in screen_text(terminal),
+                        timeout=30), screen_text(terminal)
+        assert 'All done.' not in screen_text(terminal)
+    finally:
+        release.set()
+    assert agent_done(terminal, session), screen_text(terminal)
+    assert 'First half is here, and All done.' in screen_text(terminal)
+
+
 def approve(terminal):
     assert wait_for(lambda: '[a]pprove' in screen_text(terminal),
                     timeout=30), screen_text(terminal)
     terminal.vte.feed_child(b'a')
-
-
-def agent_done(terminal, session):
-    return wait_for(lambda: session.state == session.PROMPT and
-                    'All done.' in screen_text(terminal), timeout=30)
 
 
 def test_agent_command_gets_a_terminal(home, history, agent_setup):
@@ -526,3 +688,63 @@ def test_agent_with_cursor_not_at_end(name, recall, home, history,
     assert agent_done(terminal, session), screen_text(terminal)
     assert agent_setup.requests[0]['messages'][-1]['content'].endswith(
         'where am i')
+
+
+def test_agent_streams_reviews(home, history, agent_setup, monkeypatch):
+    """The command shows at once, and the review prints as it arrives"""
+    import json
+    import threading
+    monkeypatch.setattr(controller_module, 'Config', lambda: {
+        'promptline_agent_mode': 'auto-review',
+        'promptline_review_reasoning': 'low'})
+    server = agent_setup
+    release = threading.Event()
+    steps = [
+        {'tool_calls': [tool_call('run_command', command='echo looked',
+                                  reason='read-only check')]},
+        {'content': 'All done.'},
+    ]
+
+    def do_POST(handler):
+        length = int(handler.headers['Content-Length'])
+        body = json.loads(handler.rfile.read(length))
+        if not body['messages'][0]['content'].startswith('You review'):
+            server.requests.append(body)
+            message = dict({'role': 'assistant', 'content': None},
+                           **steps[len(server.requests) - 1])
+            data = json.dumps({'choices': [{'message': message}]}).encode()
+            handler.send_response(200)
+            handler.send_header('Content-Type', 'application/json')
+            handler.send_header('Content-Length', str(len(data)))
+            handler.end_headers()
+            handler.wfile.write(data)
+            return
+        assert body.get('stream') is True
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'text/event-stream')
+        handler.end_headers()
+
+        def send(text):
+            chunk = {'choices': [{'delta': {'content': text}}]}
+            handler.wfile.write(('data: %s\n\n' % json.dumps(chunk)).encode())
+            handler.wfile.flush()
+        send('SAFE: it only')
+        release.wait(20)            # the rest only after the test has looked
+        send(' prints text.')
+        handler.wfile.write(b'data: [DONE]\n\n')
+        handler.close_connection = True
+    server.httpd.RequestHandlerClass.do_POST = do_POST
+
+    terminal, session, controller = start_shell(
+        shutil.which('bash'), str(home), {}, with_controller=True)
+    run_agent(terminal, session, controller, 'check')
+    try:
+        assert wait_for(lambda: 'reviewer: it only' in screen_text(terminal),
+                        timeout=30), screen_text(terminal)
+        assert '$ echo looked' in screen_text(terminal)
+        assert 'prints text' not in screen_text(terminal)
+    finally:
+        release.set()
+    assert agent_done(terminal, session), screen_text(terminal)
+    screen = screen_text(terminal)
+    assert '$ echo looked\n  reviewer: it only prints text.\nlooked' in screen

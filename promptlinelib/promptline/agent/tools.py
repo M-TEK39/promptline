@@ -62,6 +62,39 @@ TOOLS = [
             'additionalProperties': False,
         },
     }},
+    {'type': 'function', 'function': {
+        'name': 'remember',
+        'description': (
+            'Save a lasting fact about the user (their tools, preferences, '
+            'environments, habits) to your memory, which you will see in '
+            'future conversations. The user is told what you saved. Never '
+            'save secrets.'),
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'fact': {'type': 'string',
+                         'description': 'One short, specific fact.'},
+                'replaces': {'type': 'string',
+                             'description': 'Text of an existing fact this '
+                                            'one supersedes, or empty.'},
+            },
+            'required': ['fact', 'replaces'],
+            'additionalProperties': False,
+        },
+    }},
+    {'type': 'function', 'function': {
+        'name': 'forget',
+        'description': 'Remove facts from your memory that contain this '
+                       'text.',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'match': {'type': 'string'},
+            },
+            'required': ['match'],
+            'additionalProperties': False,
+        },
+    }},
 ]
 
 
