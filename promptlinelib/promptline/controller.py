@@ -133,6 +133,8 @@ class Controller(object):
                 self.learn(session.log[-1])
             if self.agent_token is not None and self.agent_started:
                 self.agent_finished()
+        elif name == marks.AFTER:
+            session.on_after(marks.parse_int(value))
         self.schedule_refresh()
 
     def learn(self, record):
@@ -285,7 +287,7 @@ class Controller(object):
         line = self.session.current_input()
         if line is None:
             return False
-        query = parse_invocation(line.text)
+        query = parse_invocation(self.session.whole_input())
         if query is None or agent_program() is None:
             return False
         request = {
