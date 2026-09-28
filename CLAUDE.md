@@ -31,9 +31,14 @@ the prompt. It is a downstream of [Terminator](https://github.com/gnome-terminat
    and drops results that are stale.
 4. **Degrade quietly.** No key, offline, rate-limited, or a bad model: the terminal keeps
    working, and errors are logged once (auth errors disable prediction for the session).
-5. **Every agent command needs approval.** `run_command` always goes through
-   `agent/approval.py` (`AskEveryTime`: approve / edit / cancel). New modes (session,
-   trusted) are new policies; the loop and executor stay as they are.
+5. **Approval is the default, and autonomy is opt-in.** `run_command` always goes
+   through a policy in `agent/approval.py`. `ask` (default) asks every time.
+   `auto-review` runs only what a reviewer model calls safe and asks for anything
+   else, including failed or unreadable reviews. `full` runs without asking, but only
+   once the user has written guardrails (`personal.guardrails_ready()`, re-checked on
+   every run). `HARD_STOPS` always ask, in every mode. Never make a mode more
+   permissive by default, never let a review failure allow, and add new modes as
+   new policies.
 6. **Keep providers swappable.** Callers use `providers.make_provider(purpose, settings)`.
    OpenAI is the first provider, and OpenAI-compatible local servers work through
    `promptline_base_url`.
@@ -50,7 +55,13 @@ the prompt. It is a downstream of [Terminator](https://github.com/gnome-terminat
   `promptline_api_key_env` or the file in `promptline_api_key_file`; the agent request
   file carries settings, not the key. The Preferences page says whether a key was
   found and never shows it.
-- Tests must never reach a real provider (the fixtures stub `make_provider`).
+- The user's files (`personal.md`, `guardrails.md`, `memory.md`, `agent-audit.log`) are
+  0600. `<!-- -->` guidance is stripped before sending, and memory facts go through
+  `redact()` before they are saved.
+- Tests must never reach a real provider (the fixtures stub `make_provider`), and
+  must never touch the user's config or data (`conftest.py` isolates both XDG dirs).
+- Every command the agent runs is appended to the audit log with how it was
+  approved. Keep that true for any new way of running commands.
 
 ## Commands
 
@@ -106,7 +117,9 @@ All Promptline code is in `promptlinelib/promptline/`:
 | `suggest/` | `history.py` (shell histories + own log, frecency), `paths.py` (unambiguous path completion), `llm.py` (context, redaction, `Predictor`) |
 | `ghost.py` | Transparent `Gtk.Overlay` layer drawing the suggestion on VTE's cell grid; never writes to the pty |
 | `providers/` | `make_provider`, key resolution; `openai.py` (Chat Completions; tool calls via the Responses API) |
-| `agent/` | `@agent`: request handoff (`__init__`), `loop.py`, `tools.py` (`run_command`, `place_on_prompt`), `approval.py`, `prompts.py`, `cli.py` (the `promptline-agent` program) |
+| `agent/` | `@agent`: request handoff (`__init__`), `loop.py`, `tools.py` (`run_command`, `place_on_prompt`, `remember`, `forget`), `prompts.py` (mode text, personalisation, memory, guardrails), `cli.py` (the `promptline-agent` program: policy choice, audit log, streaming UI) |
+| `personal.py` | The user's files: personalisation, guardrails (`guardrails_ready`), memory (`Memory`), editing (`promptline -P/--guardrails/--memory`, hooked in `optionparse.py`) |
+| `agent/approval.py` | Permission modes: `AskEveryTime`, `AutoReview` + `ModelReviewer`, `FullPermission`; `HARD_STOPS` |
 | `prefs.py` | Preferences → Promptline page, built in code |
 
 **Flow.** The shell emits marks, `Controller.on_termprops_changed` applies them in

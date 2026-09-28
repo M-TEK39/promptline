@@ -49,8 +49,35 @@ already sees what's in the terminal, so you don't paste anything:
   an environment) it types the command at your prompt, and you decide
   whether to press Enter;
 - follow-up questions in the same terminal continue the conversation;
-- it's a normal program in your terminal: Ctrl+C stops it, and its output is
-  ordinary scrollback.
+- it's a normal program in your terminal: Ctrl+C stops it, replies appear as
+  they are written, and its output is ordinary scrollback.
+
+**Personalisation.** Tell Promptline about your work once with `promptline -P`:
+your role, day-to-day tasks, the tools you use and avoid, your environments.
+The template is written with security engineers and network admins in mind.
+From then on, predictions and `@agent` fit you from the start, and don't have
+to wait for your history to fill up.
+
+**Memory.** The agent remembers lasting facts about you and says when it does
+("Remembered: uses Nessus for enterprise scans, not nmap"). It learns from
+what you tell it and from how you edit its commands. You can also ask
+directly: `@agent update your memory, I use Nessus for enterprise scans`.
+Review or edit memory with `promptline --memory`.
+
+**Permission modes** (Preferences → Promptline), for when approving every
+step gets in the way:
+
+| Mode | What runs without asking |
+| --- | --- |
+| Ask (default) | Nothing. Every command waits for approve / edit / cancel. |
+| Auto-review | Commands a separate reviewer model judges safe. Anything else asks, with the reviewer's reason. |
+| Full permission | Everything except a short list of catastrophic commands. Locked until you've written your own guardrails (`promptline --guardrails`), which the agent must follow. |
+
+In every mode, a built-in list of dangerous commands (wiping disks, deleting
+system directories, piping downloads into a shell, firewall flushes,
+shutdowns, user and sudo changes) always asks. Every command the agent runs
+is logged to `~/.local/share/promptline/agent-audit.log`. Auto-review and
+full permission are powerful: only use them where mistakes are recoverable.
 
 ## Privacy
 
@@ -62,6 +89,9 @@ already sees what's in the terminal, so you don't paste anything:
   removed first.
 - A command typed with a **leading space** is private, as in bash's and
   zsh's `ignorespace`: Promptline never learns it or sends it.
+- Your personalisation, guardrails and the agent's memory are plain text
+  files readable only by you. Guidance inside `<!-- -->` is never sent, and
+  credentials are removed from memory before it's saved.
 - API keys are read from an environment variable or a file you point to.
   They are never written to Promptline's config.
 
@@ -125,6 +155,14 @@ Open **Preferences → Promptline**, or edit `~/.config/promptline/config`:
 | `promptline_base_url` | `https://api.openai.com/v1` | Any OpenAI-compatible server |
 | `promptline_api_key_env` | `OPENAI_API_KEY` | Environment variable holding the key |
 | `promptline_api_key_file` | *(empty)* | File holding the key (use `chmod 600`) |
+| `promptline_agent_mode` | `ask` | `ask`, `auto-review` or `full` (full needs guardrails) |
+| `promptline_review_reasoning` | `medium` | Reasoning effort of the auto-review reviewer |
+
+| Command | File |
+| --- | --- |
+| `promptline -P` | `~/.config/promptline/personal.md`, about you |
+| `promptline --guardrails` | `~/.config/promptline/guardrails.md`, your rules for the agent |
+| `promptline --memory` | `~/.local/share/promptline/memory.md`, what the agent remembers |
 
 **Local models.** Point `promptline_base_url` at an OpenAI-compatible server
 such as Ollama (`http://localhost:11434/v1`) or LM Studio. A local server
