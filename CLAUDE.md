@@ -11,7 +11,7 @@ the prompt. It is a downstream of [Terminator](https://github.com/gnome-terminat
 `promptlinelib`, command `promptline`, D-Bus `io.github.m_tek39.Promptline`, config
 `~/.config/promptline`), and it still merges upstream Terminator releases.
 
-- Repo: `origin` = `git@github.com:M-TEK39/promptline.git` (public), branch `master`;
+- Repo: `origin` = `git@github.com:MurcusM/promptline.git` (public), branch `master`;
   `upstream` = gnome-terminator/terminator. Merge upstream, never rebase (`doc/UPSTREAM.md`).
 - Design, decisions and progress notes: `doc/promptline-plan.md`. User docs: `README.md`.
 - `../v1/` is an unrelated, reference-only Wave Terminal fork. Don't develop there, don't
