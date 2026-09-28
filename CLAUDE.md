@@ -63,14 +63,26 @@ xvfb-run -a pytest                 # full suite (CI runs this, on Python 3.10)
 xvfb-run -a pytest tests/test_promptline_shell.py   # end-to-end: real bash/zsh in a real VTE
 xvfb-run -a pytest promptlinelib/promptline         # Promptline doctests
 python -m compileall -f promptlinelib/ tests/ promptline-remote promptline promptline-agent
+
+dpkg-buildpackage -us -uc -b       # Debian package → ../promptline_<version>_all.deb
+debian/rules clean                 # remove .pybuild/ and debian/promptline/ afterwards
 ```
+
+- **Packaging** is `debian/` (native, pybuild over `setup.py`). A release bumps
+  `APP_VERSION` in `promptlinelib/version.py` and adds a `debian/changelog` entry
+  with the same version. The desktop file and AppStream ID is `APP_ID`
+  (`io.github.m_tek39.Promptline`). Files the app reads at runtime from its package
+  directory (glade, `themes/`, `promptline/shell/`) must be listed in
+  `setup.py`'s `package_data`. Check a staged build with `desktop-file-validate`
+  and `appstreamcli validate --no-net`.
 
 - `pytest.ini` sets `--doctest-modules`, so `>>>` examples in `promptlinelib/**/*.py` are
   tests. Promptline's pure modules keep their unit tests as doctests.
 - The root `conftest.py` points `XDG_CONFIG_HOME` at a temp dir for the whole run, because
   upstream's Preferences tests write `config_cur` into the real config dir. Keep it.
-- Known failure: `test_prefseditor_keybindings.py::...[input_key_params2-...]` also fails on
-  unmodified upstream Terminator. Anything else failing is yours.
+- Known local failure: `test_prefseditor_keybindings.py::...[input_key_params2-...]` fails
+  on the maintainer's machine even with unmodified upstream Terminator (it depends on the
+  keyboard setup) and passes in CI. Anything else failing is yours.
 - Drawing suggestions needs `python3-gi-cairo`. Without it, suggestions are computed but
   not drawn, and one error is logged.
 - Test live against a provider only when the user asks, and keep it to one or two

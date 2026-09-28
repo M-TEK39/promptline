@@ -80,13 +80,20 @@ sudo apt install python3-gi python3-gi-cairo python3-psutil python3-configobj \
   gir1.2-gtk-3.0 gir1.2-vte-2.91 gir1.2-keybinder-3.0 gir1.2-notify-0.7
 ```
 
-## Running
+## Installing
+
+On Debian/Ubuntu, build and install the package:
 
 ```sh
+sudo apt install debhelper dh-python gettext intltool
 git clone https://github.com/M-TEK39/promptline.git
 cd promptline
-python3 promptline
+dpkg-buildpackage -us -uc -b
+sudo apt install ../promptline_*_all.deb
 ```
+
+Or run it straight from the checkout with `python3 promptline`. See
+[INSTALL.md](INSTALL.md) for details.
 
 Promptline installs alongside Terminator without conflicts: it has its own
 command, config directory (`~/.config/promptline`), D-Bus name and desktop

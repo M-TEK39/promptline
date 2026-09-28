@@ -1,8 +1,28 @@
 Installing Promptline
 =====================
 
-Promptline isn't packaged by distributions yet. Run it from a checkout, or
-install it for your user.
+Promptline isn't in distribution repositories yet. On Debian and Ubuntu,
+build and install the `.deb` package (recommended). Otherwise, run it from
+a checkout.
+
+Debian / Ubuntu package
+-----------------------
+
+    sudo apt install debhelper dh-python gettext intltool   # build tools, once
+    git clone https://github.com/M-TEK39/promptline.git
+    cd promptline
+    dpkg-buildpackage -us -uc -b
+    sudo apt install ../promptline_*_all.deb
+
+apt installs the dependencies. You get the `promptline` command and a
+Promptline entry in your applications menu. To make it your default
+terminal:
+
+    sudo update-alternatives --config x-terminal-emulator
+
+On GNOME, also set it as the terminal the desktop opens (for example with
+Ctrl+Alt+T) in Settings. To update, pull, rebuild and install the new
+`.deb` the same way. To remove: `sudo apt remove promptline`.
 
 Dependencies
 ------------
@@ -23,8 +43,10 @@ From a checkout
     cd promptline
     python3 promptline
 
-Installing
-----------
+Installing with setup.py
+------------------------
+
+For systems without Debian packaging:
 
     python3 setup.py build
     python3 setup.py install --user --record=install-files.txt
