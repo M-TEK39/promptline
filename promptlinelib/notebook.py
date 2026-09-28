@@ -243,7 +243,7 @@ class Notebook(Container, Gtk.Notebook):
             err('%s not found in Notebook. Actual parent is: %s' %
                     (widget, widget.get_parent()))
             return(False)
-        self.detach_tab(page_num)
+        self.detach_tab(widget)
         self.disconnect_child(widget)
         return(True)
 
@@ -401,7 +401,7 @@ class Notebook(Container, Gtk.Notebook):
         if maker.isinstance(child, 'Terminal'):
             dbg('child is a single Terminal')
 
-            del nb.last_active_term[child]
+            nb.last_active_term.pop(child, None)
             child.close()
             # FIXME: We only do this del and return here to avoid removing the
             # page below, which child.close() implicitly does

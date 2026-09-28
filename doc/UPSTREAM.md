@@ -16,6 +16,7 @@ because Promptline's history is public.
   | `terminal.py` | attach a controller, wrap the VTE for the suggestion layer, Enter/→ key hook, shell integration at spawn, register termprops on import |
   | `config.py` | one line merging `promptline_defaults.GLOBAL_DEFAULTS` into `DEFAULTS` |
   | `prefseditor.py` | add the Promptline page to the notebook |
+  | `notebook.py` | crash fixes: `remove()` passes the widget to `detach_tab()`, not the page number; `closetab()` tolerates a missing `last_active_term` entry. Keep whichever side upstream fixes. |
   | `util.py` | config directory name, first-run import of Terminator settings |
   | `ipc.py` | D-Bus name |
   | `version.py`, `setup.py`, `data/`, `doc/*.adoc` | identity (name, version, desktop entry, icons, man pages) |
