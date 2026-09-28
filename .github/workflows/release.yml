@@ -1,0 +1,87 @@
+name: Release
+
+# Pushing a tag vX.Y.Z builds the Debian package and publishes it as a
+# GitHub release. Running the workflow by hand only builds and checks the
+# package (it's kept as a workflow artifact).
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deb:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install packaging tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          debhelper dh-python dpkg-dev gettext intltool python3 python3-setuptools \
+          desktop-file-utils appstream
+
+    - name: Check versions agree
+      run: |
+        app=$(python3 -c "exec(open('promptlinelib/version.py').read()); print(APP_VERSION)")
+        changelog=$(dpkg-parsechangelog -S Version)
+        echo "APP_VERSION=$app debian/changelog=$changelog ref=$GITHUB_REF_NAME"
+        if [ "$app" != "$changelog" ]; then
+          echo "::error::promptlinelib/version.py ($app) and debian/changelog ($changelog) differ"
+          exit 1
+        fi
+        if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$app" ]; then
+          echo "::error::tag $GITHUB_REF_NAME doesn't match version $app (expected v$app)"
+          exit 1
+        fi
+        echo "VERSION=$app" >> "$GITHUB_ENV"
+
+    - name: Build the package
+      run: |
+        dpkg-buildpackage -us -uc -b
+        mkdir dist
+        mv ../promptline_${VERSION}_all.deb dist/
+        cd dist && sha256sum promptline_${VERSION}_all.deb > SHA256SUMS
+
+    - name: Check the package
+      run: |
+        dpkg-deb --info dist/promptline_${VERSION}_all.deb
+        dpkg-deb -R dist/promptline_${VERSION}_all.deb pkg
+        test -x pkg/usr/bin/promptline
+        test -x pkg/usr/bin/promptline-agent
+        test -f pkg/usr/lib/python3/dist-packages/promptlinelib/promptline/shell/zdotdir/.zshenv
+        desktop-file-validate pkg/usr/share/applications/*.desktop
+        appstreamcli validate --no-net pkg/usr/share/metainfo/*.xml
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: promptline-${{ env.VERSION }}-deb
+        path: dist/
+
+    - name: Publish the release
+      if: github.ref_type == 'tag'
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        {
+          dpkg-parsechangelog -S Changes | tail -n +4 | sed 's/^  //'
+          echo
+          echo "## Install on Debian / Ubuntu"
+          echo
+          echo '```sh'
+          echo "sudo apt install ./promptline_${VERSION}_all.deb"
+          echo '```'
+          echo
+          echo "apt installs the dependencies. See [INSTALL.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/INSTALL.md) for details."
+        } > notes.md
+        if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+        else
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag \
+            --title "Promptline $VERSION" --notes-file notes.md
+        fi

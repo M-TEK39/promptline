@@ -82,7 +82,9 @@ sudo apt install python3-gi python3-gi-cairo python3-psutil python3-configobj \
 
 ## Installing
 
-On Debian/Ubuntu, build and install the package:
+On Debian/Ubuntu, download the `.deb` from the
+[latest release](https://github.com/M-TEK39/promptline/releases/latest) and run
+`sudo apt install ./promptline_<version>_all.deb`. Or build it yourself:
 
 ```sh
 sudo apt install debhelper dh-python gettext intltool

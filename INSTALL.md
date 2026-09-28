@@ -2,11 +2,21 @@ Installing Promptline
 =====================
 
 Promptline isn't in distribution repositories yet. On Debian and Ubuntu,
-build and install the `.deb` package (recommended). Otherwise, run it from
-a checkout.
+install the `.deb` package from a release, or build it yourself. Otherwise,
+run it from a checkout.
 
-Debian / Ubuntu package
------------------------
+Debian / Ubuntu: from a release
+-------------------------------
+
+Download `promptline_<version>_all.deb` from the
+[releases page](https://github.com/M-TEK39/promptline/releases), then:
+
+    sudo apt install ./promptline_<version>_all.deb
+
+Each release also lists the package's SHA-256 checksum (`SHA256SUMS`).
+
+Debian / Ubuntu: building the package
+-------------------------------------
 
     sudo apt install debhelper dh-python gettext intltool   # build tools, once
     git clone https://github.com/M-TEK39/promptline.git

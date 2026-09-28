@@ -68,9 +68,13 @@ dpkg-buildpackage -us -uc -b       # Debian package → ../promptline_<version>_
 debian/rules clean                 # remove .pybuild/ and debian/promptline/ afterwards
 ```
 
-- **Packaging** is `debian/` (native, pybuild over `setup.py`). A release bumps
-  `APP_VERSION` in `promptlinelib/version.py` and adds a `debian/changelog` entry
-  with the same version. The desktop file and AppStream ID is `APP_ID`
+- **Packaging** is `debian/` (native, pybuild over `setup.py`). **Releasing:** bump
+  `APP_VERSION` in `promptlinelib/version.py`, add a `debian/changelog` entry with the
+  same version (its bullets become the release notes), commit, then push a tag
+  `vX.Y.Z`. `.github/workflows/release.yml` checks that the three agree, builds and
+  validates the `.deb`, and publishes a GitHub release with it and `SHA256SUMS`.
+  Running that workflow by hand only builds, and keeps the `.deb` as an artifact.
+  Tagging publishes to the public repo, so only do it when the user asks. The desktop file and AppStream ID is `APP_ID`
   (`io.github.m_tek39.Promptline`). Files the app reads at runtime from its package
   directory (glade, `themes/`, `promptline/shell/`) must be listed in
   `setup.py`'s `package_data`. Check a staged build with `desktop-file-validate`
