@@ -100,11 +100,12 @@ class OpenAIProvider(object):
             self.reasoning_effort, (0, 0))
         return max_tokens + extra_tokens, max(timeout, min_timeout)
 
-    def complete(self, messages, max_tokens=256, timeout=15):
+    def complete(self, messages, max_tokens=256, timeout=15, on_text=None):
         """Return the reply text for messages. max_tokens is the size of the
-        visible reply; room for reasoning is added on top."""
-        return self.chat(messages, max_tokens=max_tokens,
-                         timeout=timeout)['content'] or ''
+        visible reply; room for reasoning is added on top. With on_text, the
+        reply is streamed to it as it arrives."""
+        return self.chat(messages, max_tokens=max_tokens, timeout=timeout,
+                         on_text=on_text)['content'] or ''
 
     def chat(self, messages, tools=None, max_tokens=4096, timeout=60,
              on_text=None):

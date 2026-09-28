@@ -28,7 +28,8 @@ import time
 
 from . import read_request, runtime_dir, write_prefill
 from .. import personal
-from .approval import AskEveryTime, AutoReview, FullPermission, ModelReviewer
+from .approval import ALLOW, AskEveryTime, AutoReview, FullPermission, \
+    ModelReviewer, ReviewStream
 from .loop import Agent
 from .prompts import system_prompt, user_message
 from .tools import run_command
@@ -116,7 +117,7 @@ class TtyUI(object):
         self.write('\033[1A\r\033[2K' * rows + prompt_prefix + BOLD +
                    '@agent' + RESET + ' ' + query + '\n')
 
-    def thinking(self, fn):
+    def thinking(self, fn, label='thinking'):
         result = {}
 
         def work():
@@ -131,8 +132,9 @@ class TtyUI(object):
         while thread.is_alive():
             with self.lock:
                 if self.tty and not self.streaming:
-                    self.write('\r%s%s thinking%s' % (
-                        DIM, self.SPINNER[frame % len(self.SPINNER)], RESET))
+                    self.write('\r%s%s %s%s' % (
+                        DIM, self.SPINNER[frame % len(self.SPINNER)], label,
+                        RESET))
             frame += 1
             thread.join(0.12)
         with self.lock:
@@ -183,12 +185,51 @@ class TtyUI(object):
         self.write('  ' + BOLD + '$ ' + command + RESET + '  ' + DIM +
                    '(%s)' % (note or 'full permission') + RESET + '\n')
 
-    def approve(self, command, reason, note=None):
+    def review_start(self, command, reason):
+        """Show the command while the reviewer looks at it"""
+        self.review = ReviewStream()
         if reason:
             self.write(DIM + reason + RESET + '\n')
-        if note:
-            self.write(WARN + note + RESET + '\n')
         self.write('  ' + BOLD + '$ ' + command + RESET + '\n')
+
+    def review_text(self, piece):
+        """Print the reviewer's reason as it arrives (provider's thread)"""
+        text = self.review.feed(piece)
+        with self.lock:
+            if not self.streaming:
+                text = text.lstrip()
+                if not text:
+                    return
+                if self.tty:
+                    self.out.write('\r\033[K')    # the spinner's line
+                self.streaming = True
+                self.write(DIM + '  reviewer: ' if self.review.verdict ==
+                           'safe' else WARN + 'Reviewer: ')
+            self.write(text)
+
+    def review_end(self, decision):
+        with self.lock:
+            streamed, self.streaming = self.streaming, False
+        if streamed:
+            self.write(RESET + '\n')
+        # Show the decision's own note if nothing streamed, or if it isn't
+        # what streamed (the review failed part way, say)
+        agrees = streamed and (self.review.verdict == 'safe') == (
+            decision.action == ALLOW) and not \
+            (decision.note or '').startswith('Review failed')
+        if decision.note and not agrees:
+            if decision.action == ALLOW:
+                self.write('  ' + DIM + decision.note + RESET + '\n')
+            else:
+                self.write(WARN + decision.note + RESET + '\n')
+
+    def approve(self, command, reason, note=None, shown=False):
+        if not shown:
+            if reason:
+                self.write(DIM + reason + RESET + '\n')
+            if note:
+                self.write(WARN + note + RESET + '\n')
+            self.write('  ' + BOLD + '$ ' + command + RESET + '\n')
         if not self.tty:
             self.note('Not running it: no terminal to ask for approval.')
             return 'cancel', command

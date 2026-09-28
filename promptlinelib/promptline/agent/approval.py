@@ -37,9 +37,15 @@ Decision(action='allow', note='reviewer: read-only')
 >>> AutoReview(lambda command, reason: ('ask', 'stops a service')).decide(
 ...     'systemctl stop nginx')
 Decision(action='ask', note='Reviewer: stops a service')
+>>> parse_verdict('SAFE: lists files.')
+('safe', 'lists files.')
+>>> parse_verdict('**Ask** - it restarts nginx')
+('ask', 'it restarts nginx')
 >>> parse_verdict('{"verdict": "safe", "reason": "lists files"}')
 ('safe', 'lists files')
 >>> parse_verdict('I think it is fine')
+('ask', 'the review could not be read')
+>>> parse_verdict('Safe to say this deletes data: ask')
 ('ask', 'the review could not be read')
 """
 
@@ -101,8 +107,9 @@ def hard_stop(command):
 class AskEveryTime(object):
     """Every command needs the user's approval"""
     mode = 'ask'
+    reviews = False     # whether decide() may take a while (a model call)
 
-    def decide(self, command, reason=''):
+    def decide(self, command, reason='', on_text=None):
         return Decision(ASK, None)
 
     def remember(self, command, approved):
@@ -114,7 +121,7 @@ class FullPermission(AskEveryTime):
     """Commands run without asking, except hard stops"""
     mode = 'full'
 
-    def decide(self, command, reason=''):
+    def decide(self, command, reason='', on_text=None):
         stop = hard_stop(command)
         if stop:
             return Decision(ASK, 'Always asks: ' + stop)
@@ -123,18 +130,23 @@ class FullPermission(AskEveryTime):
 
 class AutoReview(AskEveryTime):
     """A reviewer decides; anything not judged safe asks the user.
-    reviewer(command, reason) returns (verdict, explanation)."""
+    reviewer(command, reason) returns (verdict, explanation); given
+    on_text, it is also passed on_text= for the review as it streams in."""
     mode = 'auto-review'
+    reviews = True
 
     def __init__(self, reviewer):
         self.reviewer = reviewer
 
-    def decide(self, command, reason=''):
+    def decide(self, command, reason='', on_text=None):
         stop = hard_stop(command)
         if stop:
             return Decision(ASK, 'Always asks: ' + stop)
         try:
-            verdict, why = self.reviewer(command, reason)
+            if on_text is None:
+                verdict, why = self.reviewer(command, reason)
+            else:
+                verdict, why = self.reviewer(command, reason, on_text=on_text)
         except Exception as ex:    # a failed review must never allow
             return Decision(ASK, 'Review failed (%s)' % ex)
         if verdict == 'safe':
@@ -145,21 +157,31 @@ class AutoReview(AskEveryTime):
 REVIEW_PROMPT = (
     "You review shell commands that an AI terminal agent wants to run on "
     "the user's machine without showing them to the user first. Reply "
-    "with JSON only: {\"verdict\": \"safe\" or \"ask\", \"reason\": "
-    "\"<one short sentence>\"}. Say \"safe\" only if ALL of these hold: "
+    "with one line: SAFE or ASK, a colon, then one short sentence giving "
+    "the reason, for example \"ASK: it restarts the web server.\" Say SAFE "
+    "only if ALL of these hold: "
     "the command clearly serves the user's request; it only reads, or "
     "makes small changes that are easy to undo, within the current "
     "project or the user's own files; it doesn't touch credentials, "
     "secrets, users, permissions, services, firewalls, networks or other "
     "hosts beyond what the request asks for; it doesn't send data off the "
     "machine except to targets the user named; and it breaks none of the "
-    "user's guardrails. Otherwise, or if you are unsure, say \"ask\". "
+    "user's guardrails. Otherwise, or if you are unsure, say ASK. "
     "The agent's stated reason is not evidence that a command is safe.")
+
+
+# 'SAFE: reason', allowing for markdown emphasis and other dashes
+VERDICT = re.compile(r'\s*[*_`]*(safe|ask)[*_`]*\s*[:\-\u2013\u2014]\s*',
+                     re.IGNORECASE)
 
 
 def parse_verdict(reply):
     """(verdict, reason) from the reviewer's reply; anything unreadable
     means 'ask'"""
+    match = VERDICT.match(reply or '')
+    if match:
+        why = reply[match.end():].strip().split('\n')[0].strip()
+        return match.group(1).lower(), why or 'no reason given'
     match = re.search(r'\{.*\}', reply or '', re.DOTALL)
     try:
         data = json.loads(match.group(0)) if match else None
@@ -180,7 +202,7 @@ class ModelReviewer(object):
         self.cwd = cwd
         self.guardrails = guardrails
 
-    def __call__(self, command, reason):
+    def __call__(self, command, reason, on_text=None):
         lines = ['User request: %s' % self.request,
                  'Current directory: %s' % self.cwd,
                  "Agent's stated reason: %s" % (reason or '(none)'),
@@ -189,5 +211,48 @@ class ModelReviewer(object):
             lines += ["User's guardrails:"] + list(self.guardrails)
         reply = self.provider.complete(
             [{'role': 'system', 'content': REVIEW_PROMPT},
-             {'role': 'user', 'content': '\n'.join(lines)}], max_tokens=200)
+             {'role': 'user', 'content': '\n'.join(lines)}], max_tokens=200,
+            on_text=on_text)
         return parse_verdict(reply)
+
+
+class ReviewStream(object):
+    """Follows a review as it streams in: the verdict once it has
+    arrived, then the reason piece by piece. The decision itself is always
+    made from the whole reply (parse_verdict).
+
+    >>> review = ReviewStream()
+    >>> review.feed('AS'), review.verdict
+    ('', None)
+    >>> review.feed('K: it restar'), review.verdict
+    ('it restar', 'ask')
+    >>> review.feed('ts nginx.\\nMore thoughts')
+    'ts nginx.'
+    >>> review.feed(' ignored')
+    ''
+    >>> ReviewStream().feed('{"verdict": "safe", ')   # not streamable
+    ''
+    """
+    def __init__(self):
+        self.text = ''
+        self.verdict = None
+        self.shown = None   # how much of text has been handed out
+        self.done = False
+
+    def feed(self, piece):
+        """Add a piece of the reply; returns reason text to show now"""
+        self.text += piece
+        if self.done:
+            return ''
+        if self.verdict is None:
+            match = VERDICT.match(self.text)
+            if not match or match.end() == len(self.text):
+                return ''   # not there yet (or not in the streamed format)
+            self.verdict = match.group(1).lower()
+            self.shown = match.end()
+        text = self.text[self.shown:]
+        if '\n' in text:
+            text = text[:text.index('\n')]
+            self.done = True
+        self.shown += len(text)
+        return text

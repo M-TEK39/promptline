@@ -9,7 +9,11 @@ UI methods: thinking(fn) runs fn while showing progress and returns its
 result; stream(text) and end_stream() for replies printed as they arrive;
 say(text) for replies that arrived whole; approve(command, reason, note) -> ('approve'|'cancel',
 command); auto_approved(command, mode, note); running(command);
-finished(status); note(text).
+finished(status); note(text). Optionally, for policies that review
+commands (a model call that takes a moment): review_start(command, reason)
+shows the command before the review, review_text(piece) the review as it
+streams in, review_end(decision) finishes it; approve() is then called with
+shown=True.
 
 >>> class Provider(object):
 ...     def __init__(self, replies): self.replies = list(replies)
@@ -168,15 +172,31 @@ class Agent(object):
         if name != 'run_command':
             return 'Error: there is no tool called %r.' % name
         reason = args.get('reason', '')
-        decision = self.policy.decide(command, reason)
+        shown = self.policy.reviews and hasattr(self.ui, 'review_start')
+        if shown:
+            self.ui.review_start(command, reason)
+            decision = self.ui.thinking(
+                lambda: self.policy.decide(command, reason,
+                                           on_text=self.ui.review_text),
+                label='reviewing')
+            self.ui.review_end(decision)
+        else:
+            decision = self.policy.decide(command, reason)
         if decision.action == DENY:
             return 'This command is not allowed.'
         proposed = command
         if decision.action == ALLOW:
-            self.ui.auto_approved(command, self.policy.mode, decision.note)
+            if not shown:
+                self.ui.auto_approved(command, self.policy.mode,
+                                      decision.note)
             how = self.policy.mode
         else:
-            answer, command = self.ui.approve(command, reason, decision.note)
+            if shown:
+                answer, command = self.ui.approve(command, reason,
+                                                  decision.note, shown=True)
+            else:
+                answer, command = self.ui.approve(command, reason,
+                                                  decision.note)
             self.policy.remember(command, answer == 'approve')
             if answer != 'approve':
                 result = 'The user declined to run this command.'

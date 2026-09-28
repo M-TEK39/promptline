@@ -447,8 +447,8 @@ def scripted(server, steps, review=None):
             command = body['messages'][-1]['content'].split(
                 'Command: ')[1].split('\n')[0]
             verdict, reason = review(command)
-            message = {'role': 'assistant', 'content': json.dumps(
-                {'verdict': verdict, 'reason': reason})}
+            message = {'role': 'assistant',
+                       'content': '%s: %s' % (verdict.upper(), reason)}
             server.reviews.append(command)
         else:
             server.requests.append(body)
@@ -560,7 +560,9 @@ def test_agent_auto_review(home, history, agent_setup, monkeypatch):
     assert agent_done(terminal, session), screen_text(terminal)
 
     screen = screen_text(terminal)
-    assert '(reviewer: only prints text)' in screen
+    assert '$ echo looked\n  reviewer: only prints text' in screen
+    assert '$ echo pretend-restart\nReviewer: restarts a service\n' \
+        '  [a]pprove' in screen
     assert agent_setup.reviews == ['echo looked', 'echo pretend-restart']
     assert [(line[2], line[5]) for line in audit_lines(home)] == [
         ('auto-review', 'echo looked'), ('approved', 'echo pretend-restart')]
@@ -686,3 +688,63 @@ def test_agent_with_cursor_not_at_end(name, recall, home, history,
     assert agent_done(terminal, session), screen_text(terminal)
     assert agent_setup.requests[0]['messages'][-1]['content'].endswith(
         'where am i')
+
+
+def test_agent_streams_reviews(home, history, agent_setup, monkeypatch):
+    """The command shows at once, and the review prints as it arrives"""
+    import json
+    import threading
+    monkeypatch.setattr(controller_module, 'Config', lambda: {
+        'promptline_agent_mode': 'auto-review',
+        'promptline_review_reasoning': 'low'})
+    server = agent_setup
+    release = threading.Event()
+    steps = [
+        {'tool_calls': [tool_call('run_command', command='echo looked',
+                                  reason='read-only check')]},
+        {'content': 'All done.'},
+    ]
+
+    def do_POST(handler):
+        length = int(handler.headers['Content-Length'])
+        body = json.loads(handler.rfile.read(length))
+        if not body['messages'][0]['content'].startswith('You review'):
+            server.requests.append(body)
+            message = dict({'role': 'assistant', 'content': None},
+                           **steps[len(server.requests) - 1])
+            data = json.dumps({'choices': [{'message': message}]}).encode()
+            handler.send_response(200)
+            handler.send_header('Content-Type', 'application/json')
+            handler.send_header('Content-Length', str(len(data)))
+            handler.end_headers()
+            handler.wfile.write(data)
+            return
+        assert body.get('stream') is True
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'text/event-stream')
+        handler.end_headers()
+
+        def send(text):
+            chunk = {'choices': [{'delta': {'content': text}}]}
+            handler.wfile.write(('data: %s\n\n' % json.dumps(chunk)).encode())
+            handler.wfile.flush()
+        send('SAFE: it only')
+        release.wait(20)            # the rest only after the test has looked
+        send(' prints text.')
+        handler.wfile.write(b'data: [DONE]\n\n')
+        handler.close_connection = True
+    server.httpd.RequestHandlerClass.do_POST = do_POST
+
+    terminal, session, controller = start_shell(
+        shutil.which('bash'), str(home), {}, with_controller=True)
+    run_agent(terminal, session, controller, 'check')
+    try:
+        assert wait_for(lambda: 'reviewer: it only' in screen_text(terminal),
+                        timeout=30), screen_text(terminal)
+        assert '$ echo looked' in screen_text(terminal)
+        assert 'prints text' not in screen_text(terminal)
+    finally:
+        release.set()
+    assert agent_done(terminal, session), screen_text(terminal)
+    screen = screen_text(terminal)
+    assert '$ echo looked\n  reviewer: it only prints text.\nlooked' in screen
