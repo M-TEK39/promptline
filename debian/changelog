@@ -1,3 +1,21 @@
+promptline (0.2.0) unstable; urgency=medium
+
+  * Personalisation: promptline -P opens a file about your role, work,
+    tools and environments. Command prediction and @agent both use it.
+  * Permission modes for @agent (Preferences > Promptline): Ask (the
+    default); Auto-review, where a reviewer model lets clearly safe commands
+    run and asks for anything else; and Full, unlocked once promptline
+    --guardrails holds at least three of your own rules. A built-in list of
+    dangerous commands always asks, in every mode.
+  * Every command the agent runs is logged to
+    ~/.local/share/promptline/agent-audit.log, with how it was approved.
+  * Memory: @agent remembers lasting facts about your work, learns from
+    commands you edit, and forgets on request. Review it with
+    promptline --memory.
+  * @agent replies and auto-review's reasons print as they are written.
+
+ -- m-tek39 <murcus39@gmail.com>  Mon, 28 Sep 2026 16:43:24 +0200
+
 promptline (0.1.1) unstable; urgency=medium
 
   * Fix crashes when a shell exits in a tab, when splitting a pane inside
