@@ -113,12 +113,12 @@ sudo apt install python3-gi python3-gi-cairo python3-psutil python3-configobj \
 ## Installing
 
 On Debian/Ubuntu, download the `.deb` from the
-[latest release](https://github.com/M-TEK39/promptline/releases/latest) and run
+[latest release](https://github.com/MurcusM/promptline/releases/latest) and run
 `sudo apt install ./promptline_<version>_all.deb`. Or build it yourself:
 
 ```sh
 sudo apt install debhelper dh-python gettext intltool
-git clone https://github.com/M-TEK39/promptline.git
+git clone https://github.com/MurcusM/promptline.git
 cd promptline
 dpkg-buildpackage -us -uc -b
 sudo apt install ../promptline_*_all.deb
