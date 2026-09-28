@@ -14,8 +14,9 @@ because Promptline's history is public.
   | File | Promptline change |
   | --- | --- |
   | `terminal.py` | attach a controller, wrap the VTE for the suggestion layer, Enter/→ key hook, shell integration at spawn, register termprops on import |
-  | `config.py` | one line merging `promptline_defaults.GLOBAL_DEFAULTS` into `DEFAULTS` |
+  | `config.py` | two lines merging `promptline_defaults.GLOBAL_DEFAULTS` and `PROFILE_DEFAULTS` into `DEFAULTS` |
   | `prefseditor.py` | add the Promptline page to the notebook |
+  | `optionparse.py` | `-P/--personalise`, `--guardrails`, `--memory`: edit the file and exit, like `--list-profiles` |
   | `util.py` | config directory name, first-run import of Terminator settings |
   | `ipc.py` | D-Bus name |
   | `version.py`, `setup.py`, `data/`, `doc/*.adoc` | identity (name, version, desktop entry, icons, man pages) |
