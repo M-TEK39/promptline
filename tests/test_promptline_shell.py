@@ -414,3 +414,84 @@ def test_termprops_registered_before_first_terminal():
                             text=True, timeout=60)
     assert result.stdout.split() == ['True', 'True'], result.stderr
     assert 'CRITICAL' not in result.stderr
+
+
+def scripted(server, steps):
+    """Make the fake server play `steps` as the agent's replies"""
+    import json
+
+    def do_POST(handler):
+        length = int(handler.headers['Content-Length'])
+        body = json.loads(handler.rfile.read(length))
+        server.requests.append(body)
+        message = dict({'role': 'assistant', 'content': None},
+                       **steps[len(server.requests) - 1])
+        data = json.dumps({'choices': [{'message': message}]}).encode()
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'application/json')
+        handler.send_header('Content-Length', str(len(data)))
+        handler.end_headers()
+        handler.wfile.write(data)
+    server.httpd.RequestHandlerClass.do_POST = do_POST
+
+
+def run_agent(terminal, session, controller, question):
+    typed(terminal, session, controller, '@agent ' + question)
+    assert press(controller, Gdk.KEY_Return)
+
+
+def approve(terminal):
+    assert wait_for(lambda: '[a]pprove' in screen_text(terminal),
+                    timeout=30), screen_text(terminal)
+    terminal.vte.feed_child(b'a')
+
+
+def agent_done(terminal, session):
+    return wait_for(lambda: session.state == session.PROMPT and
+                    'All done.' in screen_text(terminal), timeout=30)
+
+
+def test_agent_command_gets_a_terminal(home, history, agent_setup):
+    """Installer dialogs (debconf's whiptail) read single raw keys from a
+    terminal; the agent's commands must get one, and the user's keys"""
+    # The marker is computed, so the command shown for approval can't match
+    dialog = ('[ -t 1 ] && stty raw -echo && echo raw-$((6*7)); '
+              'key=$(dd bs=1 count=1 2>/dev/null); stty sane; '
+              'printf "\\033[1mgot-%s\\033[0m\\n" "$key"')
+    scripted(agent_setup, [
+        {'tool_calls': [tool_call('run_command', command=dialog,
+                                  reason='ask a question')]},
+        {'content': 'All done.'},
+    ])
+    terminal, session, controller = start_shell(
+        shutil.which('bash'), str(home), {}, with_controller=True)
+    run_agent(terminal, session, controller, 'install it')
+    approve(terminal)
+    assert wait_for(lambda: 'raw-42' in screen_text(terminal),
+                    timeout=30), screen_text(terminal)
+    terminal.vte.feed_child(b'y')
+    assert agent_done(terminal, session), screen_text(terminal)
+    assert 'got-y' in screen_text(terminal)
+    result = agent_setup.requests[1]['messages'][-1]['content']
+    # The model gets the text without the terminal's escape codes
+    assert 'got-y' in result and '\\u001b' not in result, result
+
+
+def test_agent_command_ctrl_c(home, history, agent_setup):
+    scripted(agent_setup, [
+        {'tool_calls': [tool_call('run_command',
+                                  command='echo started; sleep 60',
+                                  reason='wait')]},
+        {'content': 'All done.'},
+    ])
+    terminal, session, controller = start_shell(
+        shutil.which('bash'), str(home), {}, with_controller=True)
+    run_agent(terminal, session, controller, 'wait')
+    approve(terminal)
+    assert wait_for(lambda: 'started' in screen_text(terminal), timeout=30)
+    terminal.vte.feed_child(b'\x03')
+    # One Ctrl+C stops the command and the agent, and the shell is back
+    assert wait_for(lambda: 'Interrupted.' in screen_text(terminal) and
+                    session.state == session.PROMPT, timeout=5), \
+        screen_text(terminal)
+    assert len(agent_setup.requests) == 1
