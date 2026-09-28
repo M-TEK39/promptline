@@ -14,7 +14,12 @@ gi.require_version('Vte', '2.91')
 from gi.repository import Gdk, Gtk
 
 from promptlinelib.factory import Factory
+from promptlinelib.promptline import marks
 from promptlinelib.terminator import Terminator
+
+# Without termprops Promptline doesn't attach, so there's no layer to test
+pytestmark = pytest.mark.skipif(not marks.INSTALLED,
+                                reason='VTE too old for termprops')
 
 
 def pump(seconds=0.3):
