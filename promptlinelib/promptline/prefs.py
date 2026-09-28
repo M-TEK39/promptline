@@ -11,6 +11,7 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk
 
 from ..translation import _
+from . import personal
 from .providers import resolve_api_key
 
 REASONING = ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh']
@@ -45,6 +46,14 @@ class PromptlinePage(object):
                    _('Predict the next command on an empty prompt'))
         self.entry('autocomplete_model', _('Model'))
         self.reasoning('autocomplete_reasoning', _('Reasoning effort'))
+
+        self.heading(_('Personalisation'))
+        self.note(_('Tell Promptline about your work, the tools you prefer '
+                    'and your environments, so predictions and @agent fit '
+                    'you from the start. The agent also keeps a memory of '
+                    'what it learns about you. All three are plain text '
+                    'files you can edit.'))
+        self.file_buttons()
 
         self.heading(_('@agent'))
         self.note(_('Type "@agent" and a question or task at the prompt. '
@@ -107,6 +116,17 @@ class PromptlinePage(object):
         combo.connect('changed', lambda c: self.set(
             key, c.get_active_text().strip()))
         self.attach(combo, text)
+
+    def file_buttons(self):
+        box = Gtk.Box(spacing=6)
+        for kind, label in (('personal', _('About me...')),
+                            ('guardrails', _('Guardrails...')),
+                            ('memory', _('Memory...'))):
+            button = Gtk.Button(label=label)
+            button.connect('clicked',
+                           lambda _b, k=kind: personal.edit(k, gui=True))
+            box.pack_start(button, False, False, 0)
+        self.attach(box)
 
     def key_file(self):
         box = Gtk.Box(spacing=6)

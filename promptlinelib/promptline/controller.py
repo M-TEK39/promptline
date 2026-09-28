@@ -22,6 +22,7 @@ from . import marks
 from .agent import agent_program, parse_invocation, take_prefill, \
     write_request
 from .ghost import GhostText
+from . import personal
 from .providers import make_provider, provider_settings
 from .session import ShellSession
 from .suggest import Suggester
@@ -234,7 +235,9 @@ class Controller(object):
 
     def predict(self, key, typed, cwd):
         self.predict_id = None
-        messages = build_messages(typed, cwd, list(self.session.log))
+        messages = build_messages(typed, cwd, list(self.session.log),
+                                  personal=personal.personal_text(),
+                                  memory=personal.Memory().text())
         self.predictor.request(key, typed, messages, self.on_prediction)
         return False
 

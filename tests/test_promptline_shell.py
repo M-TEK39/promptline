@@ -302,6 +302,12 @@ def agent_setup(monkeypatch, tmp_path, fake_openai):
     runtime = tmp_path / 'runtime'
     runtime.mkdir()
     monkeypatch.setenv('XDG_RUNTIME_DIR', str(runtime))
+    # Personalisation, guardrails and memory for this test only
+    (tmp_path / 'config' / 'promptline').mkdir(parents=True)
+    (tmp_path / 'config' / 'promptline' / 'personal.md').write_text(
+        '<!-- hint -->\n## My role\nSOC analyst\n## Tools I avoid\n')
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'config'))
+    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'data'))
     monkeypatch.setenv('PYTHONPATH', os.path.dirname(program))
     monkeypatch.setattr(agent_module, 'agent_program', lambda: program)
     monkeypatch.setattr(controller_module, 'agent_program', lambda: program)
@@ -331,6 +337,9 @@ def test_agent(name, home, history, agent_setup):
     steps = [
         {'tool_calls': [tool_call('run_command', command='echo agent-ran',
                                   reason='check something')]},
+        {'tool_calls': [tool_call('remember',
+                                  fact='Uses Nessus for enterprise scans',
+                                  replaces='')]},
         {'tool_calls': [tool_call('place_on_prompt', command='cd /tmp')]},
         {'content': 'All done.'},
     ]
@@ -376,7 +385,16 @@ def test_agent(name, home, history, agent_setup):
         first = server.requests[0]
         assert first['model'] == 'agent-model'
         assert [t['function']['name'] for t in first['tools']] == \
-            ['run_command', 'place_on_prompt']
+            ['run_command', 'place_on_prompt', 'remember', 'forget']
+        # Personalisation reaches the agent (hints and empty sections don't)
+        system = first['messages'][0]['content']
+        assert 'About the user, in their own words:\n## My role\nSOC analyst' \
+            in system
+        assert 'hint' not in system and 'Tools I avoid' not in system
+        # ...and the memory it saved is on disk and was announced
+        memory = home / 'data' / 'promptline' / 'memory.md'
+        assert '- Uses Nessus for enterprise scans' in memory.read_text()
+        assert 'Remembered: Uses Nessus for enterprise scans' in screen
         request = first['messages'][-1]['content']
         assert "Request: what's wrong?" in request
         assert 'ls /nonexistent-dir' in request and '[exit 2]' in request

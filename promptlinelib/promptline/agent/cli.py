@@ -27,6 +27,7 @@ import threading
 import time
 
 from . import read_request, runtime_dir, write_prefill
+from .. import personal
 from .loop import Agent
 from .prompts import system_prompt, user_message
 from .tools import run_command
@@ -200,6 +201,21 @@ class TtyUI(object):
         self.write('\n')
 
 
+def first_time_tip(ui):
+    """Once: point out personalisation, which helps from the first request"""
+    marker = os.path.join(os.path.dirname(personal.path('memory')),
+                          'personalisation-tip')
+    if os.path.exists(marker):
+        return
+    ui.note('Tip: tell Promptline about your work, tools and environments '
+            'with `promptline -P`.')
+    try:
+        os.makedirs(os.path.dirname(marker), mode=0o700, exist_ok=True)
+        open(marker, 'w').close()
+    except OSError:
+        pass
+
+
 def main(argv=None):
     argv = sys.argv if argv is None else argv
     if len(argv) != 2:
@@ -226,9 +242,10 @@ def main(argv=None):
 
     provider = make_provider('agent', request.get('settings'))
     if provider is None:
-        ui.error('no API key found. Set OPENAI_API_KEY for Terminator, or '
-                 'point promptline_api_key_file in ~/.config/terminator/'
-                 'config at a file containing the key.')
+        ui.error('no API key found. Set OPENAI_API_KEY for Promptline, or '
+                 'point promptline_api_key_file in ~/.config/promptline/'
+                 'config at a file containing the key (Preferences > '
+                 'Promptline).')
         return 1
 
     cwd = request.get('cwd') or os.getcwd()
@@ -239,10 +256,17 @@ def main(argv=None):
         sys.stdout.flush()
         return run_command(command, cwd, shell, out)
 
+    memory = personal.Memory()
+    about = personal.personal_text()
+    if not about and not memory.facts():
+        first_time_tip(ui)
+
     store = ConversationStore(request.get('terminal'))
     history = store.load()
-    agent = Agent(provider, ui, executor, messages=[
-        {'role': 'system', 'content': system_prompt(shell)}] + history)
+    prompt = system_prompt(shell, personal=about, memory=memory.text(),
+                           guardrails=personal.guardrail_rules())
+    agent = Agent(provider, ui, executor, memory=memory, messages=[
+        {'role': 'system', 'content': prompt}] + history)
     try:
         agent.run(user_message(request))
     except KeyboardInterrupt:

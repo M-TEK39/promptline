@@ -47,6 +47,25 @@ Declining is reported back to the model:
 >>> agent.messages[2]['content']
 'The user declined to run this command.'
 
+Memory tools, and edits reported back to the model:
+
+>>> class Memory(object):
+...     def __init__(self): self.facts = []
+...     def add(self, fact, replaces=None): self.facts.append(fact); return True
+...     def forget(self, match): return []
+>>> provider = Provider([call('remember', fact='Uses Nessus, not nmap',
+...                           replaces=''),
+...                      call('run_command', command='nmap -sV 10.0.0.5',
+...                           reason='check services'),
+...                      {'role': 'assistant', 'content': 'Done.'}])
+>>> ui = UI(('approve', 'nessuscli scan --target 10.0.0.5'))
+>>> agent = Agent(provider, ui, executor, memory=Memory())
+>>> agent.run({'role': 'user', 'content': 'scan 10.0.0.5'})
+>>> ui.log[0]
+('note', 'Remembered: Uses Nessus, not nmap')
+>>> json.loads(agent.messages[4]['content'])['note']
+'The user edited your command and ran this instead: nessuscli scan --target 10.0.0.5'
+
 place_on_prompt remembers the command for the user's prompt:
 
 >>> provider = Provider([call('place_on_prompt', command='cd /srv/app'),
@@ -67,11 +86,12 @@ MAX_STEPS = 25
 
 class Agent(object):
     def __init__(self, provider, ui, executor, policy=None, messages=None,
-                 max_steps=MAX_STEPS):
+                 max_steps=MAX_STEPS, memory=None):
         self.provider = provider
         self.ui = ui
         self.executor = executor
         self.policy = policy or AskEveryTime()
+        self.memory = memory
         self.messages = list(messages or [])
         self.max_steps = max_steps
         self.prefill = None
@@ -103,6 +123,8 @@ class Agent(object):
             args = json.loads(function.get('arguments') or '{}')
         except ValueError:
             return 'Error: the arguments were not valid JSON.'
+        if name in ('remember', 'forget'):
+            return self.handle_memory(name, args)
         command = (args.get('command') or '').strip()
         if not command:
             return 'Error: no command given.'
@@ -117,6 +139,7 @@ class Agent(object):
         decision = self.policy.decide(command)
         if decision == DENY:
             return 'This command is not allowed.'
+        proposed = command
         if decision != ALLOW:
             answer, command = self.ui.approve(command,
                                               args.get('reason', ''))
@@ -126,4 +149,27 @@ class Agent(object):
         self.ui.running(command)
         status, output = self.executor(command)
         self.ui.finished(status)
-        return json.dumps({'exit_status': status, 'output': output})
+        result = {'exit_status': status, 'output': output}
+        if command != proposed:
+            # How the user changes a command is worth learning from
+            result['note'] = 'The user edited your command and ran this ' \
+                'instead: %s' % command
+        return json.dumps(result)
+
+    def handle_memory(self, name, args):
+        if self.memory is None:
+            return 'Error: memory is not available.'
+        if name == 'remember':
+            fact = (args.get('fact') or '').strip()
+            if not fact:
+                return 'Error: no fact given.'
+            if self.memory.add(fact, (args.get('replaces') or '').strip()
+                               or None):
+                self.ui.note('Remembered: %s' % fact)
+                return 'Saved to memory.'
+            return 'Already in memory.'
+        match = (args.get('match') or '').strip()
+        gone = self.memory.forget(match) if match else []
+        for fact in gone:
+            self.ui.note('Forgot: %s' % fact)
+        return 'Forgot %d fact(s).' % len(gone)
