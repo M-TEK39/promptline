@@ -32,6 +32,7 @@ class GhostText(Gtk.DrawingArea):
         self.text = None
         self.cell = None
         self.set_can_focus(False)
+        self.set_has_window(False)
         if CAN_DRAW:
             self.connect('draw', self.on_draw)
         else:
