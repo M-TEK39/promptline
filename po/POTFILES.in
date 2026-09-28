@@ -2,8 +2,8 @@
 # Please keep this file sorted alphabetically.
 #
 [encoding: UTF-8]
-promptline-remote
-promptline
+promptline-remote.py
+promptline.py
 data/promptline.desktop.in
 data/promptline.appdata.xml.in
 promptlinelib/borg.py

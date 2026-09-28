@@ -1,5 +1,10 @@
 # Translation
 
+> **Promptline:** translations come from Terminator (merged with upstream
+> releases, see `doc/UPSTREAM.md`); Promptline has no Transifex project of its
+> own yet. The template is `po/promptline.pot`. Don't use `tx push`: `.tx/config`
+> is Terminator's project. The rest of this file is Terminator's guide.
+
 Terminator has been translated to multiple languages and locales, but there is always
 work to do, so everyone is welcome to help and contribute.
 
@@ -20,7 +25,7 @@ source code.
 
     cd po/
     ./genpot.sh
-    git diff terminator.pot
+    git diff promptline.pot
 
 To generate and handle POT and PO files, you will need at least `gettext` and `intltool` installed.
 
